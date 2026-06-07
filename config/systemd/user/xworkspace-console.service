@@ -1,0 +1,14 @@
+[Unit]
+Description=XWorkspace Console dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/xworkspace-console/dashboard
+ExecStart=/usr/bin/npm run dev -- --host 127.0.0.1 --port 17000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

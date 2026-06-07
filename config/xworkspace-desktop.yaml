@@ -1,0 +1,77 @@
+desktop:
+  product_name: XWorkspace Console
+  dashboard_url: http://127.0.0.1:17000
+  dashboard_port: 17000
+  api_port: 8788
+  browser_binary: google-chrome
+  browser_fallback: chromium-browser
+  dock: plank
+  terminal: xfce4-terminal
+
+endpoints:
+  console:
+    bind: 127.0.0.1
+    port: 17000
+    url: http://127.0.0.1:17000
+    owner: xworkspace-console.service
+  status_api:
+    bind: 127.0.0.1
+    port: 8788
+    url: http://127.0.0.1:8788
+    owner: xworkspace-api.service
+  xworkmate_bridge:
+    bind: 127.0.0.1
+    port: 8787
+    url: http://127.0.0.1:8787
+    owner: xworkspace-bridge.service
+  openclaw:
+    bind: 127.0.0.1
+    port: 18789
+    url: http://127.0.0.1:18789/channels
+    owner: xworkspace-openclaw.service
+  litellm:
+    bind: 127.0.0.1
+    port: 4000
+    url: http://127.0.0.1:4000/ui
+    owner: xworkspace-litellm.service
+  vault:
+    bind: 127.0.0.1
+    port: 8200
+    url: http://127.0.0.1:8200
+    owner: xworkspace-vault.service
+  terminal:
+    bind: 127.0.0.1
+    port: 7681
+    url: http://127.0.0.1:7681
+    owner: ttyd.service or xworkspace-ttyd.service
+  deprecated_portal:
+    bind: 127.0.0.1
+    port: 7000
+    url: http://127.0.0.1:7000
+    owner: xworkspace-portal.service
+    status: deprecated
+
+services:
+  console:
+    name: xworkspace-console.service
+    workdir: "%h/xworkspace-console/dashboard"
+    command: /usr/bin/npm run dev -- --host 127.0.0.1 --port 17000
+  openclaw:
+    name: xworkspace-openclaw.service
+    workdir: /home/ubuntu
+    command: /home/ubuntu/.local/bin/openclaw gateway run --port 18789 --force
+  bridge:
+    name: xworkspace-bridge.service
+    workdir: /opt/cloud-neutral/xworkmate-bridge
+    command: /home/ubuntu/.local/bin/xworkmate-go-core serve --listen 127.0.0.1:8787
+  litellm:
+    name: xworkspace-litellm.service
+  vault:
+    name: xworkspace-vault.service
+
+ui:
+  top_panel_height: 30
+  hide_desktop_icons: true
+  dock_autohide: true
+  theme_family: gtk
+  panel_style: xfce4

@@ -1,0 +1,17 @@
+[Unit]
+Description=XWorkspace bridge control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/cloud-neutral/xworkmate-bridge
+Environment=HOME=/home/ubuntu
+Environment=TERM=xterm-256color
+Environment=BRIDGE_CONFIG_PATH=/opt/cloud-neutral/xworkmate-bridge/config.yaml
+ExecStart=/home/ubuntu/.local/bin/xworkmate-go-core serve --listen 127.0.0.1:8787
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -34,12 +34,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+dashboard/node_modules/
+dashboard/dist/
 
-# flutter
+# desktop/ui build artifacts
 .dart_tool/
 .idea/
-.metadata
 build/
 coverage/
-pubspec.lock
 *.iml

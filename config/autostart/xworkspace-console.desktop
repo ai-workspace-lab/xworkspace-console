@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=XWorkspace Console
+Exec=/bin/bash -lc "${HOME}/xworkspace-console/scripts/start-chromium-console.sh http://127.0.0.1:17000"
+Terminal=false
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,13 @@
+[Unit]
+Description=XWorkspace Vault
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bash -lc 'while true; do sleep 3600; done'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

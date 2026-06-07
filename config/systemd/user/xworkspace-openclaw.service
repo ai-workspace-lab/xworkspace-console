@@ -1,0 +1,20 @@
+[Unit]
+Description=XWorkspace OpenClaw gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu
+Environment=HOME=/home/ubuntu
+Environment=TERM=xterm-256color
+Environment=PATH=/home/ubuntu/.nix-profile/bin:/home/ubuntu/.local/bin:/home/ubuntu/.npm-global/bin:/home/ubuntu/bin:/usr/local/bin:/usr/bin:/bin
+Environment=OPENCLAW_GATEWAY_PORT=18789
+Environment=OPENCLAW_NO_RESPAWN=1
+Environment=NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+ExecStart=/home/ubuntu/.local/bin/openclaw gateway run --port 18789 --force
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
