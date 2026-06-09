@@ -7,7 +7,9 @@ type Tab = {
   label: string;
   href: string;
   kind: 'internal' | 'external' | 'embed';
+  icon?: string;
   closable?: boolean;
+  source?: 'builtin' | 'custom';
 };
 
 type Service = {
@@ -26,9 +28,6 @@ type NavItem = {
 const navGroups: NavItem[][] = [
   [
     { id: 'workspace', label: 'Workspace', icon: 'home', href: '#workspace', kind: 'internal' },
-    { id: 'agents', label: 'Agents', icon: 'bot', href: '#agents', kind: 'internal' },
-    { id: 'tasks', label: 'Tasks', icon: 'tasks', href: '#tasks', kind: 'internal' },
-    { id: 'artifacts', label: 'Artifacts', icon: 'folder', href: '#artifacts', kind: 'internal' },
   ],
   [
     { id: 'openclaw', label: 'OpenClaw', icon: 'claw', href: 'http://127.0.0.1:18789/channels', kind: 'embed' },
@@ -39,15 +38,24 @@ const navGroups: NavItem[][] = [
   [
     { id: 'runtime', label: 'Runtime', icon: 'cube', href: '#runtime', kind: 'internal' },
     { id: 'terminal', label: 'Terminal', icon: 'terminal', href: 'http://127.0.0.1:7681', kind: 'embed' },
-    { id: 'settings', label: 'Settings', icon: 'settings', href: '#settings', kind: 'internal' },
   ],
 ];
 
+const builtinServiceTabs: Tab[] = [
+  { id: 'openclaw', label: 'OpenClaw', href: 'http://127.0.0.1:18789/channels', kind: 'embed', icon: 'claw', closable: true, source: 'builtin' },
+  { id: 'vault', label: 'Vault', href: 'http://127.0.0.1:8200', kind: 'embed', icon: 'shield', closable: true, source: 'builtin' },
+  { id: 'litellm', label: 'LiteLLM', href: 'http://127.0.0.1:4000/ui', kind: 'embed', icon: 'chart', closable: true, source: 'builtin' },
+  { id: 'terminal', label: 'Terminal', href: 'http://127.0.0.1:7681', kind: 'embed', icon: 'terminal', closable: true, source: 'builtin' },
+];
+
+const customWorkspaceTabs: Tab[] = [
+  { id: 'runtime-console', label: 'Runtime', href: '#runtime-console', kind: 'internal', icon: 'cube', closable: true, source: 'custom' },
+  { id: 'bridge-console', label: 'Bridge', href: '#bridge-console', kind: 'internal', icon: 'bridge', closable: true, source: 'custom' },
+];
+
 const initialTabs: Tab[] = [
-  { id: 'workspace', label: 'Workspace', href: '#workspace', kind: 'internal' },
-  { id: 'agents', label: 'Agents', href: '#agents', kind: 'internal', closable: true },
-  { id: 'tasks', label: 'Tasks', href: '#tasks', kind: 'internal', closable: true },
-  { id: 'openclaw', label: 'OpenClaw', href: 'http://127.0.0.1:18789/channels', kind: 'embed', closable: true },
+  { id: 'workspace', label: 'Workspace', href: '#workspace', kind: 'internal', icon: 'home', source: 'builtin' },
+  builtinServiceTabs[0],
 ];
 
 const mockServices: Service[] = [
@@ -74,25 +82,13 @@ const tasks = [
   ['Document Summary', 'Qwen', 'Completed'],
 ];
 
-const activities = [
-  'Codex completed XWorkspace Console layout',
-  'Hermes gateway synced messaging state',
-  'OpenClaw generated workspace artifacts',
-  'Vault token rotated successfully',
-];
-
-const quickLinks = [
-  ['OpenClaw', 'http://127.0.0.1:18789/channels', 'claw'],
-  ['Terminal', 'http://127.0.0.1:7681', 'terminal'],
-  ['LiteLLM', 'http://127.0.0.1:4000/ui', 'chart'],
-  ['Vault', 'http://127.0.0.1:8200', 'shield'],
-];
-
 function App() {
   const [selectedTab, setSelectedTab] = useState('workspace');
   const [tabs, setTabs] = useState(initialTabs);
   const [services, setServices] = useState<Service[] | null>(null);
   const [terminalExpanded, setTerminalExpanded] = useState(false);
+  const [terminalCollapsed, setTerminalCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     fetch('http://127.0.0.1:8788/services')
@@ -119,7 +115,7 @@ function App() {
     return { runningServices, runningAgents, runningTasks };
   }, [currentServices]);
 
-  const openTab = (item: NavItem) => {
+  const openTab = (item: NavItem | Tab) => {
     setTabs((existingTabs) => {
       if (existingTabs.some((tab) => tab.id === item.id)) return existingTabs;
       return [...existingTabs, { ...item, closable: true }];
@@ -135,8 +131,13 @@ function App() {
     });
   };
 
+  const addCustomTab = () => {
+    const nextTab = customWorkspaceTabs.find((tab) => !tabs.some((open) => open.id === tab.id)) ?? customWorkspaceTabs[0];
+    openTab(nextTab);
+  };
+
   return (
-    <div className="app-shell">
+    <div className={sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-x">X</span>
@@ -164,15 +165,15 @@ function App() {
           ))}
         </nav>
 
-        <button className="collapse-button" type="button">
-          <Icon name="arrow-left" />
+        <button className="collapse-button" type="button" onClick={() => setSidebarCollapsed((value) => !value)}>
+          <Icon name={sidebarCollapsed ? 'menu' : 'arrow-left'} />
           <span>Collapse</span>
         </button>
       </aside>
 
       <main className="workspace">
         <header className="topbar">
-          <button className="menu-button" type="button" aria-label="Toggle sidebar">
+          <button className="menu-button" type="button" aria-label="Toggle sidebar" onClick={() => setSidebarCollapsed((value) => !value)}>
             <Icon name="menu" />
           </button>
           <div className="status-strip">
@@ -198,6 +199,7 @@ function App() {
               type="button"
               onClick={() => setSelectedTab(tab.id)}
             >
+              {tab.icon ? <Icon name={tab.icon} /> : null}
               <span>{tab.label}</span>
               {tab.closable ? (
                 <span
@@ -217,7 +219,7 @@ function App() {
           <button
             className="tab add"
             type="button"
-            onClick={() => openTab({ id: 'terminal', label: 'Terminal', href: 'http://127.0.0.1:7681', icon: 'terminal', kind: 'embed' })}
+            onClick={addCustomTab}
           >
             +
           </button>
@@ -226,10 +228,15 @@ function App() {
         {selected?.kind === 'embed' && selected.id !== 'workspace' ? (
           <EmbedWorkspace tab={selected} />
         ) : (
-          <WorkspaceHome services={currentServices} summary={summary} />
+          <WorkspaceHome services={currentServices} summary={summary} onOpenHome={() => setSelectedTab('workspace')} />
         )}
 
-        <TerminalDrawer expanded={terminalExpanded} onToggle={() => setTerminalExpanded((value) => !value)} />
+        <TerminalDrawer
+          collapsed={terminalCollapsed}
+          expanded={terminalExpanded}
+          onCollapse={() => setTerminalCollapsed((value) => !value)}
+          onToggle={() => setTerminalExpanded((value) => !value)}
+        />
       </main>
     </div>
   );
@@ -238,102 +245,70 @@ function App() {
 function WorkspaceHome({
   services,
   summary,
+  onOpenHome,
 }: {
   services: Service[];
   summary: { runningServices: number; runningAgents: number; runningTasks: number };
+  onOpenHome: () => void;
 }) {
   return (
     <div className="workspace-body">
-      <section className="hero-card">
-        <div>
-          <h1>Workspace Overview</h1>
-          <p>Default home view for the workspace control plane.</p>
-          <span className="healthy-chip">
-            <span />
-            System healthy
-          </span>
-        </div>
-        <div className="hero-art" aria-hidden="true">
-          <div className="orbital" />
-          <div className="cube cube-main" />
-          <div className="cube cube-small" />
-        </div>
-      </section>
-
-      <section className="core-grid">
-        <Panel title="Services">
-          <p className="panel-subtitle">OpenClaw Gateway, Bridge, LiteLLM, Vault</p>
-          <div className="service-list">
-            {services.map((service) => (
-              <div className="service-row" key={service.name}>
-                <span className={service.state === 'Running' ? 'service-dot good' : 'service-dot warn'} />
-                <strong>{service.name}</strong>
-                <span>{service.state}</span>
-              </div>
-            ))}
+      <section className="console-board">
+        <div className="command-panel">
+          <div className="board-heading">
+            <div>
+              <h1>AI Workspace Control Plane</h1>
+              <p>Runtime, gateway and local AI services are organized in one workspace.</p>
+            </div>
+            <span className="healthy-chip"><span /> Workspace Ready</span>
           </div>
-        </Panel>
 
-        <Panel title="Active Agents" action="View all">
-          <div className="agent-list">
-            {agents.map((agent) => (
-              <article className="agent-row" key={agent.name}>
-                <Icon name="bot" />
-                <div>
-                  <strong>{agent.name}</strong>
-                  <span>{agent.workspace}</span>
-                </div>
-                <StatusBadge state={agent.state} />
+          <div className="activity-card">
+            <div className="activity-head">
+              <h2>Service Activity</h2>
+              <div className="range-tabs" aria-label="Service activity range">
+                {['Today', '7d', '2w', '1m'].map((range, index) => <span className={index === 1 ? 'active' : ''} key={range}>{range}</span>)}
+              </div>
+            </div>
+            <div className="service-chart" aria-hidden="true">
+              <svg viewBox="0 0 640 220">
+                <path className="grid-line" d="M24 40H620M24 92H620M24 144H620M24 196H620" />
+                <path className="chart-muted" d="M30 150C80 116 98 184 150 130S230 54 286 112 357 168 410 118 492 88 534 122 584 168 618 110" />
+                <path className="chart-main" d="M30 166C82 124 114 176 156 126S224 62 280 104 346 154 402 102 494 52 540 88 582 128 618 64" />
+                <circle cx="280" cy="104" r="7" />
+              </svg>
+            </div>
+          </div>
+
+          <a className="service-cards homepage-link" href="#workspace" onClick={(event) => {
+            event.preventDefault();
+            onOpenHome();
+          }}>
+            {services.slice(0, 4).map((service, index) => (
+              <article className={index === 1 ? 'service-card tilted' : 'service-card'} key={service.name}>
+                <Icon name={service.name.toLowerCase().includes('vault') ? 'shield' : service.name.toLowerCase().includes('lite') ? 'chart' : service.name.toLowerCase().includes('bridge') ? 'bridge' : 'claw'} />
+                <span>{service.name}</span>
+                <strong>{service.state}</strong>
               </article>
             ))}
-          </div>
-        </Panel>
-
-        <Panel title="Recent Tasks" action="View all">
-          <div className="task-list">
-            {tasks.map(([name, agent, state]) => (
-              <div className="task-row" key={name}>
-                <strong>{name}</strong>
-                <span>{agent}</span>
-                <StatusBadge state={state} />
-              </div>
-            ))}
-          </div>
-        </Panel>
+          </a>
+          <section className="service-summary panel">
+            <div className="panel-head">
+              <h2>Core Services</h2>
+            </div>
+            <div className="service-list compact">
+              {services.map((service) => (
+                <div className="service-row" key={service.name}>
+                  <span className={service.state === 'Running' ? 'service-dot good' : 'service-dot warn'} />
+                  <strong>{service.name}</strong>
+                  <span>{service.state}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
       </section>
 
-      <section className="support-grid">
-        <Panel title="Workspace Ready">
-          <div className="ready-grid">
-            <MetricTile label="Services" value={`${summary.runningServices} Online`} />
-            <MetricTile label="Agents" value={`${summary.runningAgents} Running`} />
-            <MetricTile label="Tasks" value={`${summary.runningTasks} Running`} />
-            <MetricTile label="Artifacts" value="42 Available" />
-          </div>
-        </Panel>
-
-        <Panel title="Recent Activity">
-          <div className="activity-list">
-            {activities.map((activity) => (
-              <div key={activity}>
-                <span className="activity-dot" />
-                <p>{activity}</p>
-              </div>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title="Quick Access">
-          <div className="quick-grid">
-            {quickLinks.map(([label, href, icon]) => (
-              <a key={label} href={href} target="_blank" rel="noreferrer">
-                <Icon name={icon} />
-                <strong>{label}</strong>
-              </a>
-            ))}
-          </div>
-        </Panel>
-      </section>
     </div>
   );
 }
@@ -355,9 +330,19 @@ function EmbedWorkspace({ tab }: { tab: Tab }) {
   );
 }
 
-function TerminalDrawer({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+function TerminalDrawer({
+  collapsed,
+  expanded,
+  onCollapse,
+  onToggle,
+}: {
+  collapsed: boolean;
+  expanded: boolean;
+  onCollapse: () => void;
+  onToggle: () => void;
+}) {
   return (
-    <section className={expanded ? 'terminal-drawer expanded' : 'terminal-drawer'}>
+    <section className={[expanded ? 'terminal-drawer expanded' : 'terminal-drawer', collapsed ? 'collapsed' : ''].join(' ')}>
       <div className="terminal-head">
         <div>
           <Icon name="terminal" />
@@ -365,6 +350,7 @@ function TerminalDrawer({ expanded, onToggle }: { expanded: boolean; onToggle: (
         </div>
         <div className="terminal-actions">
           <a href="http://127.0.0.1:7681" target="_blank" rel="noreferrer">New Tab</a>
+          <button type="button" onClick={onCollapse}>{collapsed ? 'Expand' : 'Collapse'}</button>
           <button type="button" onClick={onToggle}>{expanded ? 'Restore' : 'Maximize'}</button>
           <button type="button" aria-label="Terminal menu">⋮</button>
         </div>
@@ -394,15 +380,6 @@ function Panel({ title, action, children }: React.PropsWithChildren<{ title: str
       </div>
       {children}
     </article>
-  );
-}
-
-function MetricTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="metric-tile">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
   );
 }
 
