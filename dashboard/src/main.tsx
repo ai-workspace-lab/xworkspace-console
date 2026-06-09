@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles.css';
 
@@ -89,6 +89,8 @@ function App() {
   const [terminalExpanded, setTerminalExpanded] = useState(false);
   const [terminalCollapsed, setTerminalCollapsed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [language, setLanguage] = useState<'en' | 'zh'>('en');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   useEffect(() => {
     fetch('http://127.0.0.1:8788/services')
@@ -107,6 +109,63 @@ function App() {
 
   const currentServices = services ?? mockServices;
   const selected = tabs.find((tab) => tab.id === selectedTab);
+  const labels = language === 'zh'
+    ? {
+        product: 'XWorkspace',
+        workspace: '工作空间',
+        collapse: '收起',
+        expand: '展开',
+        connected: '已连接',
+        agentsRunning: '个 Agent 运行中',
+        vaultReady: 'Vault 就绪',
+        homepageTitle: 'AI Workspace 控制面板',
+        homepageSubtitle: '在一个工作空间里统一组织 Runtime、Gateway 和本地 AI 服务。',
+        workspaceReady: '工作空间就绪',
+        activity: '服务活动',
+        coreServices: '核心服务',
+        serviceCards: '服务卡片',
+        today: '今天',
+        newTab: '新标签',
+        terminal: '终端',
+        maximize: '最大化',
+        restore: '还原',
+        themeLight: '浅色',
+        themeDark: '深色',
+        lang: '中/EN',
+        languageLabel: '语言',
+        themeLabel: '主题',
+      }
+    : {
+        product: 'XWorkspace',
+        workspace: 'Workspace',
+        collapse: 'Collapse',
+        expand: 'Expand',
+        connected: 'Connected',
+        agentsRunning: 'Agents Running',
+        vaultReady: 'Vault Ready',
+        homepageTitle: 'AI Workspace Control Plane',
+        homepageSubtitle: 'Runtime, gateway and local AI services are organized in one workspace.',
+        workspaceReady: 'Workspace Ready',
+        activity: 'Service Activity',
+        coreServices: 'Core Services',
+        serviceCards: 'Service Cards',
+        today: 'Today',
+        newTab: 'New Tab',
+        terminal: 'Terminal',
+        maximize: 'Maximize',
+        restore: 'Restore',
+        themeLight: 'Light',
+        themeDark: 'Dark',
+        lang: 'EN/中',
+        languageLabel: 'Language',
+        themeLabel: 'Theme',
+      };
+
+  const breadcrumbItems = [
+    labels.product,
+    labels.workspace,
+    selected && selected.id !== 'workspace' ? selected.label : null,
+  ].filter(Boolean) as string[];
 
   const summary = useMemo(() => {
     const runningServices = currentServices.filter((service) => service.state === 'Running').length;
@@ -137,11 +196,11 @@ function App() {
   };
 
   return (
-    <div className={sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
+    <div className={[sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell', theme === 'dark' ? 'theme-dark' : ''].join(' ')}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-x">X</span>
-          <strong>XWorkspace</strong>
+          <strong>{labels.product}</strong>
         </div>
 
         <nav className="side-nav" aria-label="XWorkspace navigation">
@@ -165,22 +224,42 @@ function App() {
           ))}
         </nav>
 
-        <button className="collapse-button" type="button" onClick={() => setSidebarCollapsed((value) => !value)}>
-          <Icon name={sidebarCollapsed ? 'menu' : 'arrow-left'} />
-          <span>Collapse</span>
+        <div className="sidebar-tools">
+          <button className="sidebar-tool-button" type="button" onClick={() => setLanguage((value) => (value === 'en' ? 'zh' : 'en'))}>
+            <span>{labels.languageLabel}</span>
+            <strong>{labels.lang}</strong>
+          </button>
+          <button className="sidebar-tool-button" type="button" onClick={() => setTheme((value) => (value === 'light' ? 'dark' : 'light'))}>
+            <span>{labels.themeLabel}</span>
+            <strong>{theme === 'light' ? labels.themeDark : labels.themeLight}</strong>
+          </button>
+        </div>
+
+        <button className="collapse-button" type="button" aria-label={sidebarCollapsed ? labels.expand : labels.collapse} onClick={() => setSidebarCollapsed((value) => !value)}>
+          <Icon name={sidebarCollapsed ? 'chevrons-right' : 'chevrons-left'} />
         </button>
       </aside>
 
       <main className="workspace">
         <header className="topbar">
-          <button className="menu-button" type="button" aria-label="Toggle sidebar" onClick={() => setSidebarCollapsed((value) => !value)}>
-            <Icon name="menu" />
-          </button>
+          <div className="topbar-left">
+            <button className="menu-button" type="button" aria-label="Toggle sidebar" onClick={() => setSidebarCollapsed((value) => !value)}>
+              <Icon name="menu" />
+            </button>
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              {breadcrumbItems.map((item, index) => (
+                <React.Fragment key={`${item}-${index}`}>
+                  {index > 0 ? <span className="breadcrumb-separator">/</span> : null}
+                  <span className={index === breadcrumbItems.length - 1 ? 'breadcrumb-current' : ''}>{item}</span>
+                </React.Fragment>
+              ))}
+            </nav>
+          </div>
           <div className="status-strip">
             <StatusItem label="Asia/Shanghai" icon="globe" />
-            <StatusItem label="Connected" icon="wifi" good />
-            <StatusItem label={`${summary.runningAgents} Agents Running`} icon="bot" good />
-            <StatusItem label="Vault Ready" icon="shield" good />
+            <StatusItem label={labels.connected} icon="wifi" good />
+            <StatusItem label={language === 'zh' ? `${summary.runningAgents} ${labels.agentsRunning}` : `${summary.runningAgents} ${labels.agentsRunning}`} icon="bot" good />
+            <StatusItem label={labels.vaultReady} icon="shield" good />
             <strong>10:30</strong>
             <button className="round-button" type="button" aria-label="Notifications">
               <Icon name="bell" />
@@ -228,10 +307,11 @@ function App() {
         {selected?.kind === 'embed' && selected.id !== 'workspace' ? (
           <EmbedWorkspace tab={selected} />
         ) : (
-          <WorkspaceHome services={currentServices} summary={summary} onOpenHome={() => setSelectedTab('workspace')} />
+          <WorkspaceHome labels={labels} services={currentServices} summary={summary} onOpenHome={() => setSelectedTab('workspace')} />
         )}
 
         <TerminalDrawer
+          labels={labels}
           collapsed={terminalCollapsed}
           expanded={terminalExpanded}
           onCollapse={() => setTerminalCollapsed((value) => !value)}
@@ -243,31 +323,50 @@ function App() {
 }
 
 function WorkspaceHome({
+  labels,
   services,
   summary,
   onOpenHome,
 }: {
+  labels: {
+    homepageTitle: string;
+    homepageSubtitle: string;
+    workspaceReady: string;
+    activity: string;
+    serviceCards: string;
+    coreServices: string;
+    today: string;
+  };
   services: Service[];
   summary: { runningServices: number; runningAgents: number; runningTasks: number };
   onOpenHome: () => void;
 }) {
+  const cardsRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollCards = (direction: 'left' | 'right') => {
+    const viewport = cardsRef.current;
+    if (!viewport) return;
+    const distance = Math.max(280, Math.floor(viewport.clientWidth * 0.72));
+    viewport.scrollBy({ left: direction === 'left' ? -distance : distance, behavior: 'smooth' });
+  };
+
   return (
     <div className="workspace-body">
       <section className="console-board">
         <div className="command-panel">
           <div className="board-heading">
             <div>
-              <h1>AI Workspace Control Plane</h1>
-              <p>Runtime, gateway and local AI services are organized in one workspace.</p>
+              <h1>{labels.homepageTitle}</h1>
+              <p>{labels.homepageSubtitle}</p>
             </div>
-            <span className="healthy-chip"><span /> Workspace Ready</span>
+            <span className="healthy-chip"><span /> {labels.workspaceReady}</span>
           </div>
 
           <div className="activity-card">
             <div className="activity-head">
-              <h2>Service Activity</h2>
+              <h2>{labels.activity}</h2>
               <div className="range-tabs" aria-label="Service activity range">
-                {['Today', '7d', '2w', '1m'].map((range, index) => <span className={index === 1 ? 'active' : ''} key={range}>{range}</span>)}
+                {[labels.today, '7d', '2w', '1m'].map((range, index) => <span className={index === 1 ? 'active' : ''} key={range}>{range}</span>)}
               </div>
             </div>
             <div className="service-chart" aria-hidden="true">
@@ -280,21 +379,48 @@ function WorkspaceHome({
             </div>
           </div>
 
-          <a className="service-cards homepage-link" href="#workspace" onClick={(event) => {
-            event.preventDefault();
-            onOpenHome();
-          }}>
-            {services.slice(0, 4).map((service, index) => (
-              <article className={index === 1 ? 'service-card tilted' : 'service-card'} key={service.name}>
-                <Icon name={service.name.toLowerCase().includes('vault') ? 'shield' : service.name.toLowerCase().includes('lite') ? 'chart' : service.name.toLowerCase().includes('bridge') ? 'bridge' : 'claw'} />
-                <span>{service.name}</span>
-                <strong>{service.state}</strong>
-              </article>
-            ))}
-          </a>
+          <section className="service-carousel">
+            <div className="carousel-head">
+              <h2>{labels.serviceCards}</h2>
+              <div className="carousel-actions">
+                <button type="button" aria-label="Scroll service cards left" onClick={() => scrollCards('left')}>
+                  <Icon name="chevron-left" />
+                </button>
+                <button type="button" aria-label="Scroll service cards right" onClick={() => scrollCards('right')}>
+                  <Icon name="chevron-right" />
+                </button>
+              </div>
+            </div>
+            <div
+              className="service-cards-scroll"
+              ref={cardsRef}
+              onWheel={(event) => {
+                if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+                event.currentTarget.scrollBy({ left: event.deltaY, behavior: 'auto' });
+              }}
+            >
+              <a className="service-cards homepage-link" href="#workspace" onClick={(event) => {
+                event.preventDefault();
+                onOpenHome();
+              }}>
+                {services.map((service, index) => (
+                  <article className={index === 1 ? 'service-card tilted' : 'service-card'} key={service.name}>
+                    <Icon name={service.name.toLowerCase().includes('vault') ? 'shield' : service.name.toLowerCase().includes('lite') ? 'chart' : service.name.toLowerCase().includes('bridge') ? 'bridge' : 'claw'} />
+                    <span>{service.name}</span>
+                    <strong>{service.state}</strong>
+                  </article>
+                ))}
+                <article className="service-card ghost-card">
+                  <Icon name="cube" />
+                  <span>Future Probe</span>
+                  <strong>Reserved</strong>
+                </article>
+              </a>
+            </div>
+          </section>
           <section className="service-summary panel">
             <div className="panel-head">
-              <h2>Core Services</h2>
+              <h2>{labels.coreServices}</h2>
             </div>
             <div className="service-list compact">
               {services.map((service) => (
@@ -331,11 +457,20 @@ function EmbedWorkspace({ tab }: { tab: Tab }) {
 }
 
 function TerminalDrawer({
+  labels,
   collapsed,
   expanded,
   onCollapse,
   onToggle,
 }: {
+  labels: {
+    terminal: string;
+    newTab: string;
+    maximize: string;
+    restore: string;
+    collapse: string;
+    expand: string;
+  };
   collapsed: boolean;
   expanded: boolean;
   onCollapse: () => void;
@@ -346,12 +481,12 @@ function TerminalDrawer({
       <div className="terminal-head">
         <div>
           <Icon name="terminal" />
-          <strong>Terminal</strong>
+          <strong>{labels.terminal}</strong>
         </div>
         <div className="terminal-actions">
-          <a href="http://127.0.0.1:7681" target="_blank" rel="noreferrer">New Tab</a>
-          <button type="button" onClick={onCollapse}>{collapsed ? 'Expand' : 'Collapse'}</button>
-          <button type="button" onClick={onToggle}>{expanded ? 'Restore' : 'Maximize'}</button>
+          <a href="http://127.0.0.1:7681" target="_blank" rel="noreferrer">{labels.newTab}</a>
+          <button type="button" onClick={onCollapse}>{collapsed ? labels.expand : labels.collapse}</button>
+          <button type="button" onClick={onToggle}>{expanded ? labels.restore : labels.maximize}</button>
           <button type="button" aria-label="Terminal menu">⋮</button>
         </div>
       </div>
@@ -417,7 +552,14 @@ function Icon({ name }: { name: string }) {
     wifi: <path d="M4 9a12 12 0 0 1 16 0M7 12a7.5 7.5 0 0 1 10 0M10 15a3 3 0 0 1 4 0M12 19h.01" />,
     bell: <path d="M18 16H6l1.4-2V10a4.6 4.6 0 0 1 9.2 0v4zM10 19h4" />,
     user: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" />,
+    languages: <path d="M4 6h9M8.5 4v2c0 4-2.2 7.2-5.5 9M6 10c1.5 2.2 3.8 4.1 6.6 5.5M14 18h7M17.5 6l4.5 12M20.3 13h-5.6" />,
+    moon: <path d="M20 14.5A7.5 7.5 0 1 1 9.5 4 6 6 0 0 0 20 14.5Z" />,
+    sun: <path d="M12 3v2.2M12 18.8V21M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M3 12h2.2M18.8 12H21M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6M12 7.2a4.8 4.8 0 1 0 0 9.6 4.8 4.8 0 0 0 0-9.6Z" />,
     'arrow-left': <path d="M19 12H5M12 5l-7 7 7 7" />,
+    'chevron-left': <path d="m15 18-6-6 6-6" />,
+    'chevron-right': <path d="m9 18 6-6-6-6" />,
+    'chevrons-left': <path d="m13.5 17-5-5 5-5M19 17l-5-5 5-5" />,
+    'chevrons-right': <path d="m10.5 17 5-5-5-5M5 17l5-5-5-5" />,
   };
 
   return (

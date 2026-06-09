@@ -50,6 +50,19 @@ button {
   grid-template-columns: 76px minmax(0, 1fr);
 }
 
+.app-shell.theme-dark {
+  --text: #e8edf8;
+  --muted: #97a3b8;
+  --paper: rgba(21, 29, 43, 0.88);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --shadow: 0 18px 42px rgba(5, 10, 18, 0.32);
+}
+
+.app-shell.theme-dark body {
+  background: #0e1420;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -92,7 +105,8 @@ button {
 
 .sidebar-collapsed .brand strong,
 .sidebar-collapsed .side-nav span,
-.sidebar-collapsed .collapse-button span {
+.sidebar-collapsed .sidebar-tool-button span,
+.sidebar-collapsed .sidebar-tool-button strong {
   display: none;
 }
 
@@ -144,22 +158,69 @@ button {
 }
 
 .collapse-button {
-  margin-top: auto;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 18px;
-  border: 0;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.92);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-top: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #7f8aa0;
   cursor: pointer;
+}
+
+.sidebar-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: auto;
+  margin-bottom: 12px;
+}
+
+.sidebar-tool-button {
+  min-height: 64px;
+  display: grid;
+  justify-items: start;
+  align-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font-size: 13px;
   font-weight: 700;
 }
 
-.sidebar-collapsed .collapse-button {
-  justify-content: center;
+.sidebar-tool-button .icon {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 2px;
+}
+
+.sidebar-tool-button span {
+  color: #a9b3c4;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sidebar-tool-button strong {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sidebar-collapsed .sidebar-tool-button {
+  min-height: 40px;
+  display: grid;
+  place-items: center;
   padding: 0;
+}
+
+.sidebar-collapsed .collapse-button {
+  margin-top: 8px;
 }
 
 .workspace {
@@ -182,6 +243,13 @@ button {
   backdrop-filter: blur(22px);
 }
 
+.topbar-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .menu-button,
 .round-button {
   width: 28px;
@@ -201,6 +269,32 @@ button {
   gap: 18px;
   color: #0f172a;
   font-size: 14px;
+}
+
+.breadcrumb {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.breadcrumb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.breadcrumb-separator {
+  flex: 0 0 auto;
+  color: rgba(99, 112, 138, 0.75);
+}
+
+.breadcrumb-current {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .status-item {
@@ -319,6 +413,56 @@ button {
   box-shadow: var(--shadow);
 }
 
+.app-shell.theme-dark .topbar {
+  background: rgba(12, 18, 29, 0.84);
+}
+
+.app-shell.theme-dark .menu-button,
+.app-shell.theme-dark .round-button,
+.app-shell.theme-dark .carousel-actions button,
+.app-shell.theme-dark .terminal-actions a,
+.app-shell.theme-dark .terminal-actions button {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.app-shell.theme-dark .sidebar-tool-button,
+.app-shell.theme-dark .collapse-button {
+  background: rgba(255, 255, 255, 0.03);
+  color: #c7d0de;
+}
+
+.app-shell.theme-dark .tab {
+  color: #a9b5ca;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.app-shell.theme-dark .tab.active,
+.app-shell.theme-dark .activity-card,
+.app-shell.theme-dark .service-card,
+.app-shell.theme-dark .service-summary,
+.app-shell.theme-dark .embed-panel,
+.app-shell.theme-dark .terminal-drawer {
+  background: rgba(21, 29, 43, 0.88);
+}
+
+.app-shell.theme-dark .range-tabs .active {
+  background: rgba(132, 201, 244, 0.22);
+  color: var(--text);
+}
+
+.app-shell.theme-dark .service-card.ghost-card {
+  background: rgba(29, 40, 58, 0.78);
+}
+
+.app-shell.theme-dark .service-card span,
+.app-shell.theme-dark .board-heading p,
+.app-shell.theme-dark .breadcrumb,
+.app-shell.theme-dark .status-strip,
+.app-shell.theme-dark .service-row span:last-child {
+  color: var(--muted);
+}
+
 .activity-card {
   min-height: 280px;
   padding: 24px;
@@ -400,13 +544,65 @@ button {
 
 .service-cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(250px, 280px);
   gap: 18px;
 }
 
 .homepage-link {
   color: inherit;
   text-decoration: none;
+}
+
+.service-carousel {
+  display: grid;
+  gap: 14px;
+}
+
+.carousel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.carousel-head h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.carousel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.carousel-actions button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+}
+
+.service-cards-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(76, 105, 167, 0.45) transparent;
+}
+
+.service-cards-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.service-cards-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(76, 105, 167, 0.45);
 }
 
 .service-card {
@@ -425,6 +621,11 @@ button {
   color: #fff;
   background: #111827;
   transform: rotate(3deg);
+}
+
+.service-card.ghost-card {
+  border-style: dashed;
+  background: rgba(236, 243, 255, 0.74);
 }
 
 .service-card .icon {
@@ -816,7 +1017,7 @@ button {
 
 @media (max-width: 1280px) {
   .service-cards {
-    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    grid-auto-columns: minmax(240px, 260px);
   }
 
   .core-grid,
@@ -853,6 +1054,14 @@ button {
     gap: 10px;
   }
 
+  .topbar-left {
+    min-width: 100%;
+  }
+
+  .breadcrumb {
+    max-width: calc(100vw - 96px);
+  }
+
   .workspace-tabs {
     overflow-x: auto;
   }
@@ -862,11 +1071,15 @@ button {
   }
 
   .service-cards {
-    grid-template-columns: 1fr;
+    grid-auto-columns: minmax(220px, 86vw);
   }
 
   .board-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .sidebar-tools {
+    grid-template-columns: 1fr;
   }
 }
