@@ -33,10 +33,21 @@ echo "Setting up XWorkspace Desktop in ${MODE} mode..."
 cp -R "${ROOT_DIR}/config/systemd/." "${HOME}/.config/systemd/user/"
 
 if [[ -d "${XFCE_DIR}" ]]; then
+  rm -rf "${DEST_DIR}" && mkdir -p "${DEST_DIR}"
   cp -R "${XFCE_DIR}/." "${DEST_DIR}/"
 fi
 
 cp -R "${ROOT_DIR}/config/autostart/." "${HOME}/.config/autostart/"
+
+if [[ "${MODE}" == "minimal" || "${MODE}" == "xface-minimal" ]]; then
+  cp "${XFCE_DIR}/xworkspace-shell.service" "${HOME}/.config/systemd/user/" 2>/dev/null || true
+  cp "${XFCE_DIR}/xworkspace-shell.desktop" "${HOME}/.config/autostart/" 2>/dev/null || true
+
+  mkdir -p "${HOME}/.config/xfce4/xfconf/xfce-perchannel-xml"
+  [[ -f "${DEST_DIR}/panel.xml" ]] && cp "${DEST_DIR}/panel.xml" "${HOME}/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml"
+  [[ -f "${DEST_DIR}/xfwm4.xml" ]] && cp "${DEST_DIR}/xfwm4.xml" "${HOME}/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml"
+  [[ -f "${DEST_DIR}/desktop-icons.xml" ]] && cp "${DEST_DIR}/desktop-icons.xml" "${HOME}/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml"
+fi
 
 python3 - "${HOME}/.config/autostart/xworkspace-console.desktop" <<'PY'
 import sys
