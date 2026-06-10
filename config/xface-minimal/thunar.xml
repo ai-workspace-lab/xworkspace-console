@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="thunar" version="1.0">
+  <property name="general" type="empty">
+    <property name="default-view" type="string" value="ThunarIconsView"/>
+    <property name="last-view" type="string" value="ThunarIconsView"/>
+    <property name="last-sort-column" type="uint" value="0"/>
+    <property name="last-sort-reverse" type="bool" value="false"/>
+    <property name="last-sort-folders-first" type="bool" value="true"/>
+  </property>
+  <property name="advanced" type="empty">
+    <property name="show-hidden" type="bool" value="false"/>
+    <property name="show-full-path" type="bool" value="false"/>
+    <property name="max-name-length" type="uint" value="200"/>
+  </property>
+</channel>

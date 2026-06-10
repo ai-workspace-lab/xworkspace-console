@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=XWorkspace Shell
+Exec=/bin/bash -lc "${HOME}/xworkspace-console/scripts/start-chromium-minimal.sh http://127.0.0.1:17000"
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-XFCE-Session-Manager=false

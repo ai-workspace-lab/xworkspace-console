@@ -1,0 +1,16 @@
+[Unit]
+Description=XWorkspace Chrome Shell
+After=graphical.target
+After=xworkspace-console.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=%h/.Xauthority
+ExecStart=/bin/bash -lc "${HOME}/xworkspace-console/scripts/start-chromium-minimal.sh http://127.0.0.1:17000"
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

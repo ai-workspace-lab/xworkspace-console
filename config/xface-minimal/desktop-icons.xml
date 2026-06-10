@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="desktop-icons" type="empty">
+    <property name="icon-size" type="int" value="2"/>
+    <property name="show-thumbnail" type="bool" value="false"/>
+    <property name="show-trash" type="bool" value="false"/>
+    <property name="show-filesystem" type="bool" value="false"/>
+    <property name="show-removable" type="bool" value="false"/>
+    <property name="single-click" type="bool" value="false"/>
+    <property name="sort" type="string" value="name"/>
+  </property>
+</channel>

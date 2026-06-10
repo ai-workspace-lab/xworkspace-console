@@ -75,3 +75,34 @@ ui:
   dock_autohide: true
   theme_family: gtk
   panel_style: xfce4
+
+minimal:
+  enabled: true
+  description: "Stage 2: Minimal window manager + Chrome Shell only"
+  window_manager: xfwm4
+  hide_panels: true
+  hide_desktop_icons: true
+  disable_file_manager: true
+  disable_notification_daemon: true
+  autostart_only_shell: true
+  config_dir: xface-minimal
+  services:
+    - xworkspace-console.service
+    - xworkspace-shell.service
+  shell_url: http://127.0.0.1:17000
+
+display_stages:
+  stage1:
+    name: "XFCE with hidden components"
+    description: "Use XFCE but hide traditional desktop components, only expose Chrome Shell"
+    panel_visible: false
+    desktop_icons_hidden: true
+  stage2:
+    name: "Minimal window manager"
+    description: "Replace XFCE with minimal window manager, only Chrome/Chromium is visible shell"
+    window_manager: xfwm4
+    all_desktop_components_hidden: true
+  stage3:
+    name: "Wayland/Weston/Cage"
+    description: "Move to Wayland/Weston/Cage mode, Chrome/Chromium is the only user-facing shell"
+    display_server: wayland
