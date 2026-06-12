@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/xworkspace-console/dashboard
-ExecStart=/usr/bin/npm run dev -- --host 127.0.0.1 --port 17000
+ExecStart=/usr/bin/npm run preview -- --host 127.0.0.1 --port 17000
 Restart=always
 RestartSec=2
 
