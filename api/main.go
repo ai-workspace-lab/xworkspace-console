@@ -18,12 +18,12 @@ type Service struct {
 }
 
 type HealthResponse struct {
-	Status  string    `json:"status"`
-	Arch    string    `json:"arch"`
-	OS      string    `json:"os"`
-	CPU     int       `json:"cpu"`
-	Memory  string    `json:"memory"`
-	Disk    string    `json:"disk"`
+	Status   string    `json:"status"`
+	Arch     string    `json:"arch"`
+	OS       string    `json:"os"`
+	CPU      int       `json:"cpu"`
+	Memory   string    `json:"memory"`
+	Disk     string    `json:"disk"`
 	Services []Service `json:"services"`
 }
 
@@ -35,17 +35,30 @@ func main() {
 
 	addr := "127.0.0.1:8788"
 	log.Printf("xworkspace api listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, withCORS(mux)))
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1:17000")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, HealthResponse{
-		Status: "ok",
-		Arch:   runtime.GOARCH,
-		OS:     runtime.GOOS,
-		CPU:    runtime.NumCPU(),
-		Memory: "unknown",
-		Disk:   "unknown",
+		Status:   "ok",
+		Arch:     runtime.GOARCH,
+		OS:       runtime.GOOS,
+		CPU:      runtime.NumCPU(),
+		Memory:   "unknown",
+		Disk:     "unknown",
 		Services: probeServices(),
 	})
 }
