@@ -6,11 +6,29 @@ export type Tab = {
   icon?: string;
   closable?: boolean;
   source?: 'builtin' | 'custom';
+  frameMode?: 'iframe' | 'external';
 };
 
 export type Service = {
   name: string;
   state: 'Running' | 'Degraded' | 'Stopped';
+  unit?: string;
+  detail?: string;
+  port?: number;
+  url?: string;
+};
+
+export type RuntimeMetrics = {
+  activeSessions: number;
+  connectedAgents: number;
+  activeModels: number;
+  skillsAvailable: number;
+  workers: number;
+};
+
+export type DashboardStatus = {
+  services: Service[];
+  metrics: RuntimeMetrics;
 };
 
 export type NavItem = {
@@ -25,12 +43,13 @@ export type ServiceDef = NavItem & {
   group: number;
   port?: number;
   match?: string[];
+  frameMode?: Tab['frameMode'];
 };
 
 export const serviceRegistry: ServiceDef[] = [
   { id: 'workspace', label: 'Overview', icon: 'home', href: '#workspace', kind: 'internal', group: 0 },
-  { id: 'openclaw', label: 'OpenClaw', icon: 'claw', href: 'http://127.0.0.1:18789/channels', kind: 'embed', group: 1, port: 18789, match: ['openclaw', 'gateway'] },
-  { id: 'vault', label: 'Vault Server', icon: 'shield', href: 'http://localhost:8200', kind: 'embed', group: 1, port: 8200, match: ['vault'] },
+  { id: 'openclaw', label: 'OpenClaw', icon: 'claw', href: 'http://127.0.0.1:18789/channels', kind: 'embed', group: 1, port: 18789, match: ['openclaw', 'gateway'], frameMode: 'external' },
+  { id: 'vault', label: 'Vault Server', icon: 'shield', href: 'http://127.0.0.1:8200/ui/', kind: 'embed', group: 1, port: 8200, match: ['vault'], frameMode: 'external' },
   { id: 'litellm', label: 'LiteLLM Admin UI', icon: 'chart', href: 'http://localhost:4000/ui', kind: 'embed', group: 1, port: 4000, match: ['litellm', 'lite'] },
   { id: 'bridge', label: 'Bridge', icon: 'bridge', href: '#bridge', kind: 'internal', group: 2, match: ['bridge'] },
   { id: 'runtime', label: 'Runtime', icon: 'cube', href: '#runtime', kind: 'internal', group: 2 },
@@ -77,6 +96,14 @@ export const mockServices: Service[] = [
   { name: 'Vault', state: 'Running' },
   { name: 'XWorkmate Bridge', state: 'Running' },
 ];
+
+export const fallbackMetrics: RuntimeMetrics = {
+  activeSessions: 0,
+  connectedAgents: 0,
+  activeModels: 0,
+  skillsAvailable: 0,
+  workers: 0,
+};
 
 export const agents = [
   { name: 'Codex Agent', state: 'Idle', workspace: 'xworkspace-console', task: 'Homepage redesign' },

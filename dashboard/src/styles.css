@@ -925,6 +925,65 @@ button {
   overflow: hidden;
 }
 
+.external-embed-fallback {
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: min(100%, 1440px, calc((100vh - 238px) * 1.6));
+  min-height: min(640px, calc(100vh - 238px));
+  aspect-ratio: 16 / 10;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.external-embed-fallback > div {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 360px;
+  text-align: center;
+}
+
+.external-embed-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--accent);
+}
+
+.external-embed-icon .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.external-embed-fallback strong {
+  font-size: 18px;
+}
+
+.external-embed-fallback p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.external-embed-fallback a {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 7px;
+  background: var(--text);
+  color: var(--panel);
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
 .terminal-drawer {
   margin: 18px 22px 28px;
   padding: 18px;
@@ -2111,6 +2170,11 @@ button.node-card {
 .embed-tool:hover {
   border-color: var(--line-strong);
   background: var(--soft);
+}
+
+.embed-tool:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .embed-tool .icon {

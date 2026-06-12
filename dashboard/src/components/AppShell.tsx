@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { agents, customWorkspaceTabs, initialTabs, labelsEn, labelsZh, mockServices, tasks } from '@/lib/data';
-import type { NavItem, Service, Tab } from '@/lib/data';
-import { fetchServices } from '@/lib/api';
+import { customWorkspaceTabs, fallbackMetrics, initialTabs, labelsEn, labelsZh, mockServices } from '@/lib/data';
+import type { NavItem, RuntimeMetrics, Service, Tab } from '@/lib/data';
+import { fetchDashboardStatus } from '@/lib/api';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { WorkspaceTabs } from './WorkspaceTabs';
@@ -14,13 +14,27 @@ export function AppShell() {
   const [selectedTab, setSelectedTab] = useState('workspace');
   const [tabs, setTabs] = useState<Tab[]>(initialTabs);
   const [services, setServices] = useState<Service[] | null>(null);
+  const [metrics, setMetrics] = useState<RuntimeMetrics>(fallbackMetrics);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [language, setLanguage] = useState<'en' | 'zh'>('en');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [remoteMode, setRemoteMode] = useState(true);
 
   useEffect(() => {
-    fetchServices().then((data) => data && setServices(data));
+    let active = true;
+    const refresh = () => {
+      fetchDashboardStatus().then((data) => {
+        if (!active || !data) return;
+        setServices(data.services);
+        setMetrics(data.metrics);
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -61,10 +75,8 @@ export function AppShell() {
 
   const summary = useMemo(() => {
     const runningServices = currentServices.filter((service) => service.state === 'Running').length;
-    const runningAgents = agents.filter((agent) => agent.state === 'Running').length;
-    const runningTasks = tasks.filter((task) => task[2] === 'Running').length;
-    return { runningServices, runningAgents, runningTasks };
-  }, [currentServices]);
+    return { runningServices, runningAgents: metrics.connectedAgents, runningTasks: metrics.workers };
+  }, [currentServices, metrics]);
 
   const openTab = (item: NavItem | Tab) => {
     setTabs((existingTabs) => {
@@ -108,6 +120,7 @@ export function AppShell() {
           selectedLabel={selected && selected.id !== 'workspace' ? selected.label : null}
           services={currentServices}
           summary={summary}
+          metrics={metrics}
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         />
 
@@ -116,7 +129,7 @@ export function AppShell() {
         {selected?.kind === 'embed' && selected.id !== 'workspace' ? (
           <EmbedView tab={selected} onBack={() => setSelectedTab('workspace')} />
         ) : (
-          <WorkspaceHome labels={labels} services={currentServices} onOpenService={openTab} />
+          <WorkspaceHome labels={labels} services={currentServices} metrics={metrics} onOpenService={openTab} />
         )}
       </main>
     </div>

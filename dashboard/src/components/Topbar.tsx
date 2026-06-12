@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Labels, Service } from '@/lib/data';
+import type { Labels, RuntimeMetrics, Service } from '@/lib/data';
 import { Icon } from './Icon';
 import { StatusAggregate } from './StatusAggregate';
 
@@ -10,12 +10,14 @@ export function Topbar({
   selectedLabel,
   services,
   summary,
+  metrics,
   onToggleSidebar,
 }: {
   labels: Labels;
   selectedLabel: string | null;
   services: Service[];
   summary: { runningServices: number; runningAgents: number };
+  metrics: RuntimeMetrics;
   onToggleSidebar: () => void;
 }) {
   const breadcrumbItems = [labels.product, labels.workspace, selectedLabel].filter(Boolean) as string[];
@@ -45,7 +47,7 @@ export function Topbar({
       </div>
       <div className="status-strip">
         <StatusAggregate labels={labels} services={services} summary={summary} />
-        <span className="status-pill"><Icon name="user" />333 Sessions</span>
+        <span className="status-pill"><Icon name="user" />{metrics.activeSessions} Sessions</span>
         <span className="status-pill"><Icon name="clock" />{time}</span>
         <button className="round-button" type="button" aria-label="Notifications">
           <Icon name="bell" />

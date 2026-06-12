@@ -1,17 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { acpAgents, agents, findServiceDef, serviceRegistry, skillGroups } from '@/lib/data';
-import type { Labels, NavItem, Service } from '@/lib/data';
+import { acpAgents, findServiceDef, serviceRegistry, skillGroups } from '@/lib/data';
+import type { Labels, NavItem, RuntimeMetrics, Service } from '@/lib/data';
 import { Icon } from './Icon';
 
 export function ArchPipeline({
   labels,
   services,
+  metrics,
   onOpenService,
 }: {
   labels: Labels;
   services: Service[];
+  metrics: RuntimeMetrics;
   onOpenService: (item: NavItem) => void;
 }) {
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -24,8 +26,8 @@ export function ArchPipeline({
   const dot = (state?: Service['state']) => (
     <i className={state === 'Running' ? 'dot good' : state ? 'dot bad' : 'dot idle'} />
   );
-  const runningAgents = agents.filter((agent) => agent.state === 'Running').map((agent) => agent.name.split(' ')[0]);
-  const totalSkills = skillGroups.reduce((count, group) => count + group.skills.length, 0);
+  const runningAgents = new Set(acpAgents.slice(0, metrics.connectedAgents));
+  const totalSkills = metrics.skillsAvailable || skillGroups.reduce((count, group) => count + group.skills.length, 0);
   const externalModels = [
     { name: 'GPT-5.5', mark: '◎', tone: 'openai' },
     { name: 'DeepSeek V4', mark: 'D', tone: 'deepseek' },
@@ -64,7 +66,7 @@ export function ArchPipeline({
         <div className="node-head">
           <span className="node-index purple">2</span>
           <strong>{labels.agentBand}</strong>
-          <small>4 {labels.sessions} · 8 {labels.workers}</small>
+          <small>{metrics.activeSessions} {labels.sessions} · {metrics.workers} {labels.workers}</small>
           {dot()}
         </div>
         <div className="agent-icons">
@@ -84,7 +86,7 @@ export function ArchPipeline({
             <strong>{labels.acpCard}</strong>
             <div className="router-grid">
               {acpAgents.map((agent) => (
-                <em key={agent} className={runningAgents.includes(agent) ? 'busy' : ''}>{agent}</em>
+                <em key={agent} className={runningAgents.has(agent) ? 'busy' : ''}>{agent}</em>
               ))}
             </div>
           </div>
@@ -95,7 +97,7 @@ export function ArchPipeline({
         <div className="node-head">
           <span className="node-index green">3</span>
           <strong>{labels.skillBand} Layer</strong>
-          <small>{totalSkills * 2}+ {labels.skillsCount}</small>
+          <small>{totalSkills}+ {labels.skillsCount}</small>
           {dot(stateOf('bridge'))}
         </div>
         <div className="skill-stack">
@@ -111,10 +113,10 @@ export function ArchPipeline({
 
       <aside className="workspace-status node-card">
         <strong>{labels.workspaceStatus}</strong>
-        <div><span>{labels.sessions}</span><b>333</b><small>Active</small><Icon name="user" /></div>
-        <div><span>Agents</span><b>7</b><small>Connected</small><Icon name="bot" /></div>
+        <div><span>{labels.sessions}</span><b>{metrics.activeSessions}</b><small>Active</small><Icon name="user" /></div>
+        <div><span>Agents</span><b>{metrics.connectedAgents}</b><small>Connected</small><Icon name="bot" /></div>
         <div><span>Memory</span><b>Enabled</b><Icon name="database" /></div>
-        <div><span>Skills</span><b>30+</b><Icon name="sparkles" /></div>
+        <div><span>Skills</span><b>{totalSkills}+</b><Icon name="sparkles" /></div>
       </aside>
 
       <button type="button" className="model-layer node-card" onClick={() => onOpenService(serviceRegistry.find((item) => item.id === 'litellm')!)}>

@@ -36,6 +36,7 @@ yarn-error.log*
 next-env.d.ts
 dashboard/node_modules/
 dashboard/dist/
+dashboard/public/status.json
 /dashboard-preview.png
 /dashboard-status-dropdown.png
 

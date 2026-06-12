@@ -1,13 +1,15 @@
-import type { Labels, NavItem, Service } from '@/lib/data';
+import type { Labels, NavItem, RuntimeMetrics, Service } from '@/lib/data';
 import { ArchPipeline } from './ArchPipeline';
 
 export function WorkspaceHome({
   labels,
   services,
+  metrics,
   onOpenService,
 }: {
   labels: Labels;
   services: Service[];
+  metrics: RuntimeMetrics;
   onOpenService: (item: NavItem) => void;
 }) {
   return (
@@ -21,7 +23,7 @@ export function WorkspaceHome({
             </div>
           </div>
 
-          <ArchPipeline labels={labels} services={services} onOpenService={onOpenService} />
+          <ArchPipeline labels={labels} services={services} metrics={metrics} onOpenService={onOpenService} />
         </div>
       </section>
     </div>
