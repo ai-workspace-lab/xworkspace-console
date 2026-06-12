@@ -64,9 +64,6 @@ export function Sidebar({
                   >
                     <Icon name={item.icon} />
                     <span>{item.label}</span>
-                    {item.id === 'sessions' ? <em>333</em> : null}
-                    {item.id === 'skills' ? <em>30+</em> : null}
-                    {item.id === 'models' ? <em>52</em> : null}
                   </a>
                 ))
               : null}

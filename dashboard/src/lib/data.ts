@@ -89,14 +89,6 @@ export const initialTabs: Tab[] = [
   { id: 'workspace', label: 'Workspace', href: '#workspace', kind: 'internal', icon: 'home', source: 'builtin' },
 ];
 
-export const mockServices: Service[] = [
-  { name: 'OpenClaw Gateway', state: 'Running' },
-  { name: 'Bridge', state: 'Running' },
-  { name: 'LiteLLM', state: 'Running' },
-  { name: 'Vault', state: 'Running' },
-  { name: 'XWorkmate Bridge', state: 'Running' },
-];
-
 export const fallbackMetrics: RuntimeMetrics = {
   activeSessions: 0,
   connectedAgents: 0,
@@ -104,22 +96,6 @@ export const fallbackMetrics: RuntimeMetrics = {
   skillsAvailable: 0,
   workers: 0,
 };
-
-export const agents = [
-  { name: 'Codex Agent', state: 'Idle', workspace: 'xworkspace-console', task: 'Homepage redesign' },
-  { name: 'Hermes Agent', state: 'Running', workspace: 'messaging', task: 'Gateway sync' },
-  { name: 'Gemini Agent', state: 'Idle', workspace: 'research', task: 'Waiting for input' },
-  { name: 'Claude Agent', state: 'Running', workspace: 'docs', task: 'Design review' },
-  { name: 'Qwen Agent', state: 'Idle', workspace: 'runtime', task: 'No active task' },
-];
-
-export const tasks = [
-  ['Generate Report', 'Hermes', 'Running'],
-  ['Data Analysis', 'Codex', 'Completed'],
-  ['Create Presentation', 'Gemini', 'Completed'],
-  ['Code Refactor', 'Claude', 'Failed'],
-  ['Document Summary', 'Qwen', 'Completed'],
-];
 
 export const skillGroups = [
   { name: 'Content', skills: ['AI News Video', 'Product Video', 'IT Evolution Video'] },
@@ -129,7 +105,6 @@ export const skillGroups = [
 ];
 
 export const acpAgents = ['Claude', 'Gemini', 'Codex', 'Hermes', 'Qwen', 'OpenCode'];
-export const modelTargets = 'GPT-5.5 · DeepSeek V4 · Gemini 3.1 · GLM 5 · Kimi · Claude';
 
 export type Labels = Record<string, string>;
 

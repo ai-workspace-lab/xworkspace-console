@@ -1,14 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { agents, findServiceDef, skillGroups } from '@/lib/data';
-import type { Labels, Service } from '@/lib/data';
+import { findServiceDef } from '@/lib/data';
+import type { Labels, RuntimeMetrics, Service } from '@/lib/data';
 import { Icon } from './Icon';
 
-export function PanelsRow({ labels, services }: { labels: Labels; services: Service[] }) {
+export function PanelsRow({ labels, services, metrics }: { labels: Labels; services: Service[]; metrics: RuntimeMetrics }) {
   const [range, setRange] = useState('7d');
-  const runningAgents = agents.filter((agent) => agent.state === 'Running').length;
-  const totalSkills = skillGroups.reduce((count, group) => count + group.skills.length, 0);
 
   return (
     <div className="panels-row">
@@ -39,10 +37,10 @@ export function PanelsRow({ labels, services }: { labels: Labels; services: Serv
           <h2>{labels.systemOverview}</h2>
         </div>
         <div className="overview-grid">
-          <div><strong>4</strong><small>{labels.activeSessions}</small></div>
-          <div><strong>{runningAgents}/{agents.length}</strong><small>{labels.connectedAgents}</small></div>
-          <div><strong>52</strong><small>{labels.activeModels}</small></div>
-          <div><strong>{totalSkills}+</strong><small>{labels.skillsAvailable}</small></div>
+          <div><strong>{metrics.activeSessions}</strong><small>{labels.activeSessions}</small></div>
+          <div><strong>{metrics.connectedAgents}</strong><small>{labels.connectedAgents}</small></div>
+          <div><strong>{metrics.activeModels}</strong><small>{labels.activeModels}</small></div>
+          <div><strong>{metrics.skillsAvailable}+</strong><small>{labels.skillsAvailable}</small></div>
         </div>
       </section>
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { customWorkspaceTabs, fallbackMetrics, initialTabs, labelsEn, labelsZh, mockServices } from '@/lib/data';
+import { customWorkspaceTabs, fallbackMetrics, initialTabs, labelsEn, labelsZh } from '@/lib/data';
 import type { NavItem, RuntimeMetrics, Service, Tab } from '@/lib/data';
 import { fetchDashboardStatus } from '@/lib/api';
 import { Sidebar } from './Sidebar';
@@ -69,7 +69,7 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const currentServices = services ?? mockServices;
+  const currentServices = services ?? [];
   const selected = tabs.find((tab) => tab.id === selectedTab);
   const labels = language === 'zh' ? labelsZh : labelsEn;
 
