@@ -52,6 +52,10 @@ func countProcesses(names ...string) int {
 
 func countLiteLLMModels() int {
 	out := commandOutput("sh", "-lc", "curl -fsS --max-time 1 http://127.0.0.1:4000/v1/models 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get(\"data\", [])))' 2>/dev/null")
+	if count := parseIntOrZero(out); count > 0 {
+		return count
+	}
+	out = commandOutput("sh", "-lc", "grep -R \"^[[:space:]]*- model_name:\" \"$HOME/.local/share/xworkspace/litellm-config.yaml\" /etc/litellm*.yaml 2>/dev/null | wc -l")
 	return parseIntOrZero(out)
 }
 
