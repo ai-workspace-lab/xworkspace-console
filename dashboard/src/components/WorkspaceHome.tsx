@@ -11,7 +11,7 @@ export function WorkspaceHome({
   onOpenService: (item: NavItem) => void;
 }) {
   return (
-    <div className="workspace-body">
+    <div className="workspace-body home-body">
       <section className="console-board">
         <div className="command-panel">
           <div className="board-heading">

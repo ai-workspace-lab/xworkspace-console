@@ -24,7 +24,14 @@ export function EmbedView({ tab, onBack }: { tab: Tab; onBack: () => void }) {
             </a>
           </div>
         </div>
-        <iframe key={reloadKey} title={`${tab.label} workspace`} src={tab.href} />
+        <iframe
+          key={reloadKey}
+          title={`${tab.label} workspace`}
+          src={tab.href}
+          allow="camera; microphone; display-capture; autoplay; clipboard-read; clipboard-write; fullscreen"
+          allowFullScreen
+          referrerPolicy="no-referrer"
+        />
       </section>
     </div>
   );

@@ -39,43 +39,26 @@ export function ArchPipeline({
 
   return (
     <section className="arch-pipeline blueprint" aria-label="Architecture pipeline">
-      <svg className="pipeline-wires" viewBox="0 0 1120 520" aria-hidden="true">
-        <defs>
-          <marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" />
-          </marker>
-        </defs>
-        <path d="M196 182H300C316 182 316 132 332 132H410" />
-        <path d="M196 182H300C316 182 316 246 332 246H410" />
-        <path d="M622 132H698C714 132 714 152 730 152H782" />
-        <path d="M622 246H698C714 246 714 198 730 198H782" />
-        <path d="M492 306V354H166C146 354 146 396 126 396H72" />
-        <path d="M564 306V354H830V312" />
-        <path d="M72 396H420V408" />
-        <path d="M830 312V396H996" />
-      </svg>
-      <span className="flow-node flow-node-a"><Icon name="memory" /></span>
-      <span className="flow-node flow-node-b"><Icon name="cube" /></span>
-      <span className="flow-alert"><Icon name="alert" /></span>
-
-      <div className="entry-card node-card">
-        <span className="node-icon chat"><Icon name="messages" /></span>
-        <strong>User Entry</strong>
-        <small>APP Chat / Web Chat<br />XWorkmate Bridge</small>
-      </div>
-
-      <button type="button" className="gateway-card node-card" onClick={() => onOpenService(serviceRegistry.find((item) => item.id === 'openclaw')!)}>
-        <div className="gateway-meta">
-          <span className="node-index blue">1</span>
-          <span className="node-title">{labels.gatewayBand}</span>
+      <div className="entry-stack">
+        <div className="entry-card node-card">
+          <span className="node-icon chat"><Icon name="messages" /></span>
+          <strong>User Entry</strong>
+          <small>APP Chat / Web Chat<br />XWorkmate Bridge</small>
         </div>
-        {dot(stateOf('openclaw'))}
-        <strong>OpenClaw Gateway</strong>
-        <small>v2026.6.1</small>
-        <small>127.0.0.1:18789</small>
-        <small>token auth</small>
-        <small>Local Only</small>
-      </button>
+
+        <button type="button" className="gateway-card node-card" onClick={() => onOpenService(serviceRegistry.find((item) => item.id === 'openclaw')!)}>
+          <div className="gateway-meta">
+            <span className="node-index blue">1</span>
+            <span className="node-title">{labels.gatewayBand}</span>
+          </div>
+          {dot(stateOf('openclaw'))}
+          <strong>OpenClaw Gateway</strong>
+          <small>v2026.6.1</small>
+          <small>127.0.0.1:18789</small>
+          <small>token auth</small>
+          <small>Local Only</small>
+        </button>
+      </div>
 
       <div className="agent-plane node-card">
         <div className="node-head">
