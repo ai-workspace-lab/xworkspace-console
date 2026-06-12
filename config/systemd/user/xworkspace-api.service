@@ -1,0 +1,14 @@
+[Unit]
+Description=XWorkspace status API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/xworkspace-console/api
+ExecStart=/usr/local/go/bin/go run .
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

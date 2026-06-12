@@ -1,0 +1,29 @@
+import type { Labels, NavItem, Service } from '@/lib/data';
+import { ArchPipeline } from './ArchPipeline';
+
+export function WorkspaceHome({
+  labels,
+  services,
+  onOpenService,
+}: {
+  labels: Labels;
+  services: Service[];
+  onOpenService: (item: NavItem) => void;
+}) {
+  return (
+    <div className="workspace-body">
+      <section className="console-board">
+        <div className="command-panel">
+          <div className="board-heading">
+            <div>
+              <h1>{labels.homepageTitle}</h1>
+              <p>{labels.homepageSubtitle}</p>
+            </div>
+          </div>
+
+          <ArchPipeline labels={labels} services={services} onOpenService={onOpenService} />
+        </div>
+      </section>
+    </div>
+  );
+}
