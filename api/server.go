@@ -29,6 +29,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/services", s.servicesHandler)
 	mux.HandleFunc("/metrics/simple", s.metricsHandler)
+	mux.Handle("/proxy/openclaw/", NewLocalProxy("http://127.0.0.1:18789", "/proxy/openclaw"))
+	mux.Handle("/proxy/vault/", NewLocalProxy("http://127.0.0.1:8200", "/proxy/vault"))
+	mux.Handle("/ui/", NewLocalProxy("http://127.0.0.1:8200", ""))
 	return mux
 }
 

@@ -48,8 +48,8 @@ export type ServiceDef = NavItem & {
 
 export const serviceRegistry: ServiceDef[] = [
   { id: 'workspace', label: 'Overview', icon: 'home', href: '#workspace', kind: 'internal', group: 0 },
-  { id: 'openclaw', label: 'OpenClaw', icon: 'claw', href: 'http://127.0.0.1:18789/channels', kind: 'embed', group: 1, port: 18789, match: ['openclaw', 'gateway'], frameMode: 'external' },
-  { id: 'vault', label: 'Vault Server', icon: 'shield', href: 'http://127.0.0.1:8200/ui/', kind: 'embed', group: 1, port: 8200, match: ['vault'], frameMode: 'external' },
+  { id: 'openclaw', label: 'OpenClaw', icon: 'claw', href: 'http://127.0.0.1:8788/proxy/openclaw/channels', kind: 'embed', group: 1, port: 18789, match: ['openclaw', 'gateway'] },
+  { id: 'vault', label: 'Vault Server', icon: 'shield', href: 'http://127.0.0.1:8788/proxy/vault/ui/', kind: 'embed', group: 1, port: 8200, match: ['vault'] },
   { id: 'litellm', label: 'LiteLLM Admin UI', icon: 'chart', href: 'http://localhost:4000/ui', kind: 'embed', group: 1, port: 4000, match: ['litellm', 'lite'] },
   { id: 'bridge', label: 'Bridge', icon: 'bridge', href: '#bridge', kind: 'internal', group: 2, match: ['bridge'] },
   { id: 'runtime', label: 'Runtime', icon: 'cube', href: '#runtime', kind: 'internal', group: 2 },
