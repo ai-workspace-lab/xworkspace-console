@@ -606,11 +606,13 @@ print_deployment_summary() {
 AI Workspace Deployment Summary
 Domain: ${domain}
 Token: ${token}
+XWorkMate Bridge: https://${domain}
 
 AI workspace (runtime desktop/browser):
 EOF
     service_status_line "Runtime desktop/browser" "xworkspace-shell.service xworkspace-console.service display-manager.service gdm.service lightdm.service" "17000"
     service_status_line "Workspace portal (console)" "xworkspace-console.service xworkspace-api.service" "17000"
+    service_status_line "XWorkMate Bridge (public)" "xworkmate-bridge.service xworkspace-bridge.service" "8787"
     service_status_line "OpenClaw" "xworkspace-openclaw.service openclaw-gateway.service openclaw.service" "18789"
     service_status_line "QMD" "xworkspace-qmd.service qmd.service qdrant.service" "6333"
     service_status_line "Hermes" "xworkspace-hermes.service hermes.service" ""
