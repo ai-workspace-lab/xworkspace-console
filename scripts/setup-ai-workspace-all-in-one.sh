@@ -499,6 +499,83 @@ wait_for_postgres() {
     error "Timed out waiting for local PostgreSQL on port $port"
 }
 
+service_status_line() {
+    local label=$1
+    local unit_patterns=$2
+    local port=${3:-}
+    local detail="not detected"
+    local state="DOWN"
+
+    if command -v systemctl >/dev/null 2>&1; then
+        local unit
+        for unit in $unit_patterns; do
+            if systemctl is-active --quiet "$unit" 2>/dev/null; then
+                state="OK"
+                detail="systemd:$unit"
+                break
+            fi
+        done
+    fi
+
+    if [ "$state" != "OK" ] && [ -n "$port" ]; then
+        if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$port )" 2>/dev/null | grep -q ":$port"; then
+            state="OK"
+            detail="port:$port"
+        elif command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+            state="OK"
+            detail="port:$port"
+        fi
+    fi
+
+    printf '  - %-28s %s (%s)\n' "$label" "$state" "$detail"
+}
+
+cli_status_line() {
+    local label=$1
+    local bin=$2
+    local state="MISSING"
+    local detail="not in PATH"
+
+    if command -v "$bin" >/dev/null 2>&1; then
+        state="OK"
+        detail="$(command -v "$bin")"
+    fi
+
+    printf '  - %-28s %s (%s)\n' "$label" "$state" "$detail"
+}
+
+print_deployment_summary() {
+    local domain=${SERVER_DOMAIN:-${XWORKMATE_BRIDGE_DOMAIN:-${BRIDGE_DOMAIN:-${ACP_BRIDGE_DOMAIN:-acp-bridge.onwalk.net}}}}
+    local token=$1
+
+    cat <<EOF
+
+AI Workspace Deployment Summary
+Domain: ${domain}
+Token: ${token}
+
+AI workspace (runtime desktop/browser):
+EOF
+    service_status_line "Runtime desktop/browser" "xworkspace-shell.service xworkspace-console.service display-manager.service gdm.service lightdm.service" "17000"
+    service_status_line "Workspace portal (console)" "xworkspace-console.service xworkspace-api.service" "17000"
+    service_status_line "OpenClaw" "xworkspace-openclaw.service openclaw-gateway.service openclaw.service" "18789"
+    service_status_line "QMD" "xworkspace-qmd.service qmd.service qdrant.service" "6333"
+    service_status_line "Hermes" "xworkspace-hermes.service hermes.service" ""
+    service_status_line "PG" "postgresql.service postgresql@16-main.service postgresql@15-main.service xworkspace-postgres.service" "5432"
+    service_status_line "Vault" "xworkspace-vault.service vault.service" "8200"
+    service_status_line "LiteLLM" "xworkspace-litellm.service litellm-proxy.service litellm.service" "4000"
+
+    cat <<'EOF'
+
+Agent CLI:
+EOF
+    cli_status_line "opencode" "opencode"
+    cli_status_line "gemini" "gemini"
+    cli_status_line "codex" "codex"
+    cli_status_line "claude" "claude"
+    printf '\n'
+}
+
 deploy_launch_agent() {
     local label=$1
     local workdir=$2
@@ -855,6 +932,7 @@ RET=$?
 
 if [ $RET -eq 0 ]; then
     success "AI Workspace deployed successfully!"
+    print_deployment_summary "$UNIFIED_AUTH_TOKEN"
 else
     error "Deployment failed with exit code $RET."
 fi
