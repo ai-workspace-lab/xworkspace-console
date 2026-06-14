@@ -484,12 +484,13 @@ commands = {
 }
 
 def wrapped(systemctl_command: str) -> str:
-    return "\n".join([
+    lines = [
         'uid="$(id -u {{ xworkspace_console_user }})"',
         'loginctl enable-linger {{ xworkspace_console_user }} || true',
         'systemctl start "user@${uid}.service" || true',
         f'runuser -u {{{{ xworkspace_console_user }}}} -- env XDG_RUNTIME_DIR="/run/user/${{uid}}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${{uid}}/bus" {systemctl_command}',
-    ])
+    ]
+    return "\n        ".join(lines)
 
 updated = text
 for old, command in commands.items():
