@@ -6,7 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/xworkspace-console/api
-ExecStart=/usr/local/go/bin/go run .
+EnvironmentFile=-%h/.config/xworkspace/portal.env
+Environment=XWORKSPACE_PORTAL_SERVICES_FILE=%h/.config/xworkspace/portal-services.json
+ExecStart=/usr/bin/env go run .
 Restart=always
 RestartSec=2
 

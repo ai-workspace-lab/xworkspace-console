@@ -40,6 +40,72 @@ button {
   font: inherit;
 }
 
+.auth-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: #edf2fa;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.auth-card .brand-mark {
+  width: 48px;
+  height: 48px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, #4f7df3, #5b4fe3);
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.auth-card h1 {
+  margin: 4px 0 0;
+  font-size: 26px;
+}
+
+.auth-card p,
+.auth-card small {
+  margin: 0;
+  color: var(--muted);
+}
+
+.auth-card small {
+  color: var(--red);
+}
+
+.auth-card input {
+  width: 100%;
+  height: 46px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 0 12px;
+  font: inherit;
+  background: #fff;
+}
+
+.auth-card button {
+  height: 46px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--blue);
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -934,7 +1000,7 @@ button {
   aspect-ratio: 16 / 10;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel);
+  background: #fff;
 }
 
 .external-embed-fallback > div {
@@ -952,7 +1018,7 @@ button {
   height: 44px;
   border-radius: 8px;
   background: var(--soft);
-  color: var(--accent);
+  color: var(--blue);
 }
 
 .external-embed-icon .icon {
@@ -975,13 +1041,19 @@ button {
   display: inline-flex;
   align-items: center;
   height: 34px;
+  gap: 8px;
   padding: 0 14px;
   border-radius: 7px;
   background: var(--text);
-  color: var(--panel);
+  color: #fff;
   font-size: 13px;
   font-weight: 750;
   text-decoration: none;
+}
+
+.external-embed-fallback a .icon {
+  width: 14px;
+  height: 14px;
 }
 
 .terminal-drawer {

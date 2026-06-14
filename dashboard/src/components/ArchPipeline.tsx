@@ -1,27 +1,30 @@
 'use client';
 
 import { useState } from 'react';
-import { acpAgents, findServiceDef, serviceRegistry, skillGroups } from '@/lib/data';
-import type { Labels, NavItem, RuntimeMetrics, Service } from '@/lib/data';
+import { acpAgents, findPortalService, findPortalServiceByRole, findPortalServiceStatus, portalServiceToNavItem, skillGroups } from '@/lib/data';
+import type { Labels, NavItem, PortalService, RuntimeMetrics, Service } from '@/lib/data';
 import { Icon } from './Icon';
 
 export function ArchPipeline({
   labels,
   services,
   metrics,
+  portalServices,
   onOpenService,
 }: {
   labels: Labels;
   services: Service[];
   metrics: RuntimeMetrics;
+  portalServices: PortalService[];
   onOpenService: (item: NavItem) => void;
 }) {
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const gatewayService = findPortalServiceByRole('gateway', portalServices);
+  const modelRouterService = findPortalServiceByRole('model-router', portalServices);
 
-  const stateOf = (id: string): Service['state'] | undefined => {
-    const def = serviceRegistry.find((item) => item.id === id);
-    const service = services.find((entry) => def?.match?.some((token) => entry.name.toLowerCase().includes(token)));
-    return service?.state;
+  const openPortalService = (serviceKey?: string) => {
+    const serviceConfig = findPortalService(serviceKey, portalServices);
+    if (serviceConfig) onOpenService(portalServiceToNavItem(serviceConfig));
   };
   const dot = (state?: Service['state']) => (
     <i className={state === 'Running' ? 'dot good' : state ? 'dot bad' : 'dot idle'} />
@@ -48,16 +51,15 @@ export function ArchPipeline({
           <small>APP Chat / Web Chat<br />XWorkmate Bridge</small>
         </div>
 
-        <button type="button" className="gateway-card node-card" onClick={() => onOpenService(serviceRegistry.find((item) => item.id === 'openclaw')!)}>
+        <button type="button" className="gateway-card node-card" onClick={() => openPortalService(gatewayService?.key)}>
           <div className="gateway-meta">
             <span className="node-index blue">1</span>
             <span className="node-title">{labels.gatewayBand}</span>
           </div>
-          {dot(stateOf('openclaw'))}
-          <strong>OpenClaw Gateway</strong>
-          <small>v2026.6.1</small>
-          <small>127.0.0.1:18789</small>
-          <small>token auth</small>
+          {dot(findPortalServiceStatus(services, gatewayService?.key, portalServices))}
+          <strong>{gatewayService?.name ?? labels.gatewayBand}</strong>
+          <small>{gatewayService?.description ?? 'Gateway service'}</small>
+          <small>{gatewayService?.url ?? 'Not configured'}</small>
           <small>Local Only</small>
         </button>
       </div>
@@ -98,7 +100,7 @@ export function ArchPipeline({
           <span className="node-index green">3</span>
           <strong>{labels.skillBand} Layer</strong>
           <small>{totalSkills}+ {labels.skillsCount}</small>
-          {dot(stateOf('bridge'))}
+          {dot()}
         </div>
         <div className="skill-stack">
           {skillGroups.map((group) => (
@@ -119,12 +121,12 @@ export function ArchPipeline({
         <div><span>Skills</span><b>{totalSkills}+</b><Icon name="sparkles" /></div>
       </aside>
 
-      <button type="button" className="model-layer node-card" onClick={() => onOpenService(serviceRegistry.find((item) => item.id === 'litellm')!)}>
+      <button type="button" className="model-layer node-card" onClick={() => openPortalService(modelRouterService?.key)}>
         <div className="node-head">
           <span className="node-index amber">4</span>
           <strong>{labels.modelBand} Layer</strong>
-          <small>LiteLLM · 4000 · OpenAI-compatible · Anthropic-compatible</small>
-          {dot(stateOf('litellm'))}
+          <small>{modelRouterService ? `${modelRouterService.name} · ${modelRouterService.url}` : 'Not configured'}</small>
+          {dot(findPortalServiceStatus(services, modelRouterService?.key, portalServices))}
         </div>
       </button>
 
@@ -145,5 +147,3 @@ export function ArchPipeline({
     </section>
   );
 }
-
-export { findServiceDef };

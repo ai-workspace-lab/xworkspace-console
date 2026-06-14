@@ -8,15 +8,19 @@ import (
 )
 
 type Server struct {
-	serviceProbe ServiceProbe
-	metricProbe  MetricProbe
+	serviceProbe   ServiceProbe
+	metricProbe    MetricProbe
+	portalServices PortalServiceProvider
+	auth           AuthConfig
 }
 
 func NewServer() *Server {
 	serviceProbe := NewServiceProbe()
 	return &Server{
-		serviceProbe: serviceProbe,
-		metricProbe:  NewMetricProbe(),
+		serviceProbe:   serviceProbe,
+		metricProbe:    NewMetricProbe(),
+		portalServices: NewPortalServiceProvider(),
+		auth:           NewAuthConfig(),
 	}
 }
 
@@ -26,12 +30,11 @@ func (s *Server) ListenAndServe(addr string) error {
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/auth/status", s.authStatusHandler)
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/services", s.servicesHandler)
+	mux.HandleFunc("/portal/services", s.portalServicesHandler)
 	mux.HandleFunc("/metrics/simple", s.metricsHandler)
-	mux.Handle("/proxy/openclaw/", NewLocalProxy("http://127.0.0.1:18789", "/proxy/openclaw"))
-	mux.Handle("/proxy/vault/", NewLocalProxy("http://127.0.0.1:8200", "/proxy/vault"))
-	mux.Handle("/ui/", NewLocalProxy("http://127.0.0.1:8200", ""))
 	return mux
 }
 
@@ -44,7 +47,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1:17000")
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Bridge-Token, X-XWorkspace-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -62,7 +65,14 @@ func allowedOrigin(origin string) bool {
 	}
 }
 
+func (s *Server) authStatusHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, AuthStatusResponse{Required: s.auth.Required()})
+}
+
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
 	services := s.serviceProbe.Probe()
 	writeJSON(w, HealthResponse{
 		Status:   "ok",
@@ -77,11 +87,34 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) servicesHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
 	writeJSON(w, s.serviceProbe.Probe())
 }
 
+func (s *Server) portalServicesHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
+	writeJSON(w, PortalServicesResponse{Services: s.portalServices.Services()})
+}
+
 func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuth(w, r) {
+		return
+	}
 	_, _ = w.Write([]byte("xworkspace_systemd_services " + strconv.Itoa(len(s.serviceProbe.Probe())) + "\n"))
+}
+
+func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	if s.auth.Authorize(r) {
+		return true
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

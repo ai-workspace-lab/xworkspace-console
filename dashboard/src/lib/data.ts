@@ -6,7 +6,20 @@ export type Tab = {
   icon?: string;
   closable?: boolean;
   source?: 'builtin' | 'custom';
-  frameMode?: 'iframe' | 'external';
+  serviceKey?: string;
+};
+
+export type PortalService = {
+  key: string;
+  name: string;
+  url: string;
+  openMode: 'iframe' | 'external';
+  healthUrl?: string;
+  description?: string;
+  icon?: string;
+  match?: string[];
+  port?: number;
+  role?: 'gateway' | 'model-router';
 };
 
 export type Service = {
@@ -37,47 +50,135 @@ export type NavItem = {
   icon: string;
   href: string;
   kind: Tab['kind'];
+  serviceKey?: string;
 };
 
-export type ServiceDef = NavItem & {
+export type NavSectionItem = NavItem & {
   group: number;
   port?: number;
   match?: string[];
-  frameMode?: Tab['frameMode'];
 };
 
-export const serviceRegistry: ServiceDef[] = [
-  { id: 'workspace', label: 'Overview', icon: 'home', href: '#workspace', kind: 'internal', group: 0 },
-  { id: 'openclaw', label: 'OpenClaw', icon: 'claw', href: 'http://127.0.0.1:8788/proxy/openclaw/channels', kind: 'embed', group: 1, port: 18789, match: ['openclaw', 'gateway'] },
-  { id: 'vault', label: 'Vault Server', icon: 'shield', href: 'http://127.0.0.1:8788/proxy/vault/ui/', kind: 'embed', group: 1, port: 8200, match: ['vault'] },
-  { id: 'litellm', label: 'LiteLLM Admin UI', icon: 'chart', href: 'http://localhost:4000/ui', kind: 'embed', group: 1, port: 4000, match: ['litellm', 'lite'] },
-  { id: 'bridge', label: 'Bridge', icon: 'bridge', href: '#bridge', kind: 'internal', group: 2, match: ['bridge'] },
-  { id: 'runtime', label: 'Runtime', icon: 'cube', href: '#runtime', kind: 'internal', group: 2 },
-  { id: 'terminal', label: 'Terminal', icon: 'terminal', href: 'http://127.0.0.1:7681', kind: 'embed', group: 2, port: 7681 },
+export type NavSection = { id: string; titleKey: string; items: NavSectionItem[] };
+
+export const portalServices: PortalService[] = [
+  {
+    key: 'litellm',
+    name: 'LiteLLM Admin UI',
+    url: 'http://localhost:4000/ui',
+    openMode: 'iframe',
+    description: 'Model routing and provider administration.',
+    icon: 'chart',
+    match: ['litellm', 'lite'],
+    port: 4000,
+    role: 'model-router',
+  },
+  {
+    key: 'openclaw',
+    name: 'OpenClaw',
+    url: 'http://127.0.0.1:18789/channels',
+    openMode: 'external',
+    description: 'Gateway dashboard. Opens outside the portal because the service blocks embedded frames.',
+    icon: 'claw',
+    match: ['openclaw', 'gateway'],
+    port: 18789,
+    role: 'gateway',
+  },
+  {
+    key: 'vault',
+    name: 'Vault Server',
+    url: 'http://127.0.0.1:8200/ui',
+    openMode: 'external',
+    description: 'Vault UI. Opens outside the portal because the service blocks embedded frames.',
+    icon: 'shield',
+    match: ['vault'],
+    port: 8200,
+  },
+  {
+    key: 'terminal',
+    name: 'Terminal',
+    url: 'http://127.0.0.1:7681',
+    openMode: 'iframe',
+    healthUrl: 'http://127.0.0.1:7681',
+    description: 'Local ttyd terminal.',
+    icon: 'terminal',
+    match: ['ttyd', 'terminal'],
+    port: 7681,
+  },
 ];
 
-export const navSections: { id: string; titleKey: string; items: ServiceDef[] }[] = [
+export const workspaceNavItems: NavSectionItem[] = [
+  { id: 'workspace', label: 'Overview', icon: 'home', href: '#workspace', kind: 'internal', group: 0 },
+  { id: 'architecture', label: 'Architecture', icon: 'network', href: '#architecture', kind: 'internal', group: 0 },
+];
+
+export const portalServiceToNavItem = (service: PortalService): NavSectionItem => ({
+  id: `service-${service.key}`,
+  label: service.name,
+  icon: service.icon ?? 'cube',
+  href: service.url,
+  kind: 'embed',
+  group: 1,
+  port: service.port,
+  match: service.match,
+  serviceKey: service.key,
+});
+
+export const portalServiceToTab = (service: PortalService): Tab => ({
+  id: `service-${service.key}`,
+  label: service.name,
+  href: service.url,
+  kind: 'embed',
+  icon: service.icon ?? 'cube',
+  closable: true,
+  source: 'builtin',
+  serviceKey: service.key,
+});
+
+export const portalNavItems = portalServices.map(portalServiceToNavItem);
+export const portalTabs = portalServices.map(portalServiceToTab);
+
+export const buildNavSections = (services: PortalService[] = portalServices): NavSection[] => [
   {
     id: 'overview',
     titleKey: '',
-    items: [
-      serviceRegistry.find((item) => item.id === 'workspace')!,
-      { id: 'architecture', label: 'Architecture', icon: 'network', href: '#architecture', kind: 'internal', group: 0 },
-    ],
+    items: workspaceNavItems,
   },
   {
     id: 'services',
     titleKey: 'navServices',
-    items: [
-      ...serviceRegistry.filter((item) => item.group === 1),
-      serviceRegistry.find((item) => item.id === 'terminal')!,
-    ],
+    items: services.map(portalServiceToNavItem),
   },
 ];
 
-export const findServiceDef = (serviceName: string): ServiceDef | undefined => {
+export const navSections = buildNavSections();
+
+export const findPortalService = (serviceKey?: string, services: PortalService[] = portalServices): PortalService | undefined => {
+  if (!serviceKey) return undefined;
+  return services.find((service) => service.key === serviceKey);
+};
+
+export const findPortalServiceByRole = (role: PortalService['role'], services: PortalService[] = portalServices): PortalService | undefined => {
+  if (!role) return undefined;
+  return services.find((service) => service.role === role);
+};
+
+export const findPortalServiceForStatus = (serviceName: string, services: PortalService[] = portalServices): PortalService | undefined => {
   const name = serviceName.toLowerCase();
-  return serviceRegistry.find((def) => def.match?.some((token) => name.includes(token)));
+  return services.find((service) => {
+    const tokens = service.match ?? [service.key, service.name];
+    return tokens.some((token) => name.includes(token.toLowerCase()));
+  });
+};
+
+export const findPortalServiceStatus = (
+  services: Service[],
+  serviceKey?: string,
+  portalServiceConfig: PortalService[] = portalServices,
+): Service['state'] | undefined => {
+  const serviceConfig = findPortalService(serviceKey, portalServiceConfig);
+  if (!serviceConfig) return undefined;
+  return services.find((entry) => findPortalServiceForStatus(entry.name, portalServiceConfig)?.key === serviceConfig.key)?.state;
 };
 
 export const customWorkspaceTabs: Tab[] = [
@@ -85,9 +186,12 @@ export const customWorkspaceTabs: Tab[] = [
   { id: 'bridge-console', label: 'Bridge', href: '#bridge-console', kind: 'internal', icon: 'bridge', closable: true, source: 'custom' },
 ];
 
-export const initialTabs: Tab[] = [
+export const buildInitialTabs = (services: PortalService[] = portalServices): Tab[] => [
   { id: 'workspace', label: 'Workspace', href: '#workspace', kind: 'internal', icon: 'home', source: 'builtin' },
+  ...services.map(portalServiceToTab),
 ];
+
+export const initialTabs = buildInitialTabs();
 
 export const fallbackMetrics: RuntimeMetrics = {
   activeSessions: 0,

@@ -9,6 +9,27 @@ type Service struct {
 	URL    string `json:"url,omitempty"`
 }
 
+type PortalService struct {
+	Key         string   `json:"key"`
+	Name        string   `json:"name"`
+	URL         string   `json:"url"`
+	OpenMode    string   `json:"openMode"`
+	HealthURL   string   `json:"healthUrl,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Icon        string   `json:"icon,omitempty"`
+	Match       []string `json:"match,omitempty"`
+	Port        int      `json:"port,omitempty"`
+	Role        string   `json:"role,omitempty"`
+}
+
+type PortalServicesResponse struct {
+	Services []PortalService `json:"services"`
+}
+
+type AuthStatusResponse struct {
+	Required bool `json:"required"`
+}
+
 type HealthResponse struct {
 	Status   string    `json:"status"`
 	Arch     string    `json:"arch"`

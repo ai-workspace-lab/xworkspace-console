@@ -20,6 +20,7 @@ export function TerminalDrawer({
   const [height, setHeight] = useState(250);
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ y: 0, height: 250 });
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const onDragStart = (event: React.PointerEvent) => {
     if (expanded || collapsed) return;
@@ -40,6 +41,11 @@ export function TerminalDrawer({
     if (!dragging) return;
     (event.target as HTMLElement).releasePointerCapture(event.pointerId);
     setDragging(false);
+  };
+
+  const focusTerminal = () => {
+    iframeRef.current?.focus();
+    iframeRef.current?.contentWindow?.focus();
   };
 
   return (
@@ -71,7 +77,18 @@ export function TerminalDrawer({
       </div>
       <div className="terminal-frame" style={!expanded && !collapsed ? { height } : undefined}>
         {!collapsed ? (
-          <iframe title="ttyd terminal" src="http://127.0.0.1:7681" loading="lazy" style={dragging ? { pointerEvents: 'none' } : undefined} />
+          <iframe
+            ref={iframeRef}
+            title="ttyd terminal"
+            src="http://127.0.0.1:7681"
+            loading="lazy"
+            tabIndex={0}
+            onLoad={focusTerminal}
+            onFocus={focusTerminal}
+            onPointerDown={focusTerminal}
+            onMouseDown={focusTerminal}
+            style={dragging ? { pointerEvents: 'none' } : undefined}
+          />
         ) : null}
       </div>
     </section>

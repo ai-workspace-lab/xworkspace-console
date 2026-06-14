@@ -1,12 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { navSections } from '@/lib/data';
-import type { Labels, NavItem } from '@/lib/data';
+import type { Labels, NavItem, NavSection } from '@/lib/data';
 import { Icon } from './Icon';
 
 export function Sidebar({
   labels,
+  navSections,
   collapsed,
   selectedTab,
   onToggle,
@@ -18,6 +18,7 @@ export function Sidebar({
   onToggleRemoteMode,
 }: {
   labels: Labels;
+  navSections: NavSection[];
   collapsed: boolean;
   selectedTab: string;
   onToggle: () => void;

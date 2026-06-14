@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { findServiceDef } from '@/lib/data';
+import { findPortalServiceForStatus } from '@/lib/data';
 import type { Labels, RuntimeMetrics, Service } from '@/lib/data';
 import { Icon } from './Icon';
 
@@ -17,14 +17,14 @@ export function PanelsRow({ labels, services, metrics }: { labels: Labels; servi
         </div>
         <div className="health-row">
           {services.map((service) => {
-            const def = findServiceDef(service.name);
+            const portalService = findPortalServiceForStatus(service.name);
             const running = service.state === 'Running';
             return (
               <div className="health-item" key={service.name} title={service.name}>
                 <span className={running ? 'health-icon good' : 'health-icon bad'}>
-                  <Icon name={def?.icon ?? 'cube'} />
+                  <Icon name={portalService?.icon ?? 'cube'} />
                 </span>
-                <small>{def?.label ?? service.name}</small>
+                <small>{portalService?.name ?? service.name}</small>
                 <em>{running ? labels.healthy : labels.degraded}</em>
               </div>
             );
