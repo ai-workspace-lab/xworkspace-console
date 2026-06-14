@@ -466,6 +466,40 @@ ensure_port_available() {
     error "Port $port is already in use by pid $pid ($command_name). Stop it or choose another port."
 }
 
+patch_playbook_user_systemd() {
+    local playbook="setup-xworkspace-console.yaml"
+    if [ ! -f "$playbook" ]; then
+        return
+    fi
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("setup-xworkspace-console.yaml")
+text = path.read_text()
+
+commands = {
+    'su - {{ xworkspace_console_user }} -c "systemctl --user daemon-reload"': 'systemctl --user daemon-reload',
+    'su - {{ xworkspace_console_user }} -c "systemctl --user restart xworkspace-console.service"': 'systemctl --user restart xworkspace-console.service',
+    'su - {{ xworkspace_console_user }} -c "systemctl --user restart xworkspace-ttyd.service"': 'systemctl --user restart xworkspace-ttyd.service',
+}
+
+def wrapped(systemctl_command: str) -> str:
+    return "\n".join([
+        'uid="$(id -u {{ xworkspace_console_user }})"',
+        'loginctl enable-linger {{ xworkspace_console_user }} || true',
+        'systemctl start "user@${uid}.service" || true',
+        f'runuser -u {{{{ xworkspace_console_user }}}} -- env XDG_RUNTIME_DIR="/run/user/${{uid}}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${{uid}}/bus" {systemctl_command}',
+    ])
+
+updated = text
+for old, command in commands.items():
+    updated = updated.replace(old, wrapped(command))
+
+if updated != text:
+    path.write_text(updated)
+PY
+}
+
 wait_for_url() {
     local url=$1
     local header=${2:-}
@@ -846,6 +880,8 @@ else
     git clone -b "$BRANCH" "$REPO_URL" "$TARGET_DIR"
     cd "$TARGET_DIR"
 fi
+
+patch_playbook_user_systemd
 
 # 3. Construct Ansible variables from Environment Variables
 ANSIBLE_EXTRA_VARS=()
