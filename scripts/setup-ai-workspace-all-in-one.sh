@@ -910,6 +910,7 @@ export XWORKSPACE_CONSOLE_PUBLIC_ACCESS="${XWORKSPACE_CONSOLE_PUBLIC_ACCESS:-fal
 export XWORKMATE_BRIDGE_PUBLIC_ACCESS="${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}"
 export GATEWAY_OPENCLAW_PUBLIC_ACCESS="${GATEWAY_OPENCLAW_PUBLIC_ACCESS:-false}"
 export VAULT_PUBLIC_ACCESS="${VAULT_PUBLIC_ACCESS:-false}"
+export VAULT_DEPLOY_MODE="${VAULT_DEPLOY_MODE:-standalone}"
 export XWORKMATE_BRIDGE_VALIDATION_BASE_URL="${XWORKMATE_BRIDGE_VALIDATION_BASE_URL:-http://127.0.0.1:8787}"
 
 # 2. Clone Repository
@@ -962,6 +963,7 @@ append_var "XWORKMATE_BRIDGE_PUBLIC_ACCESS"     "xworkmate_bridge_public_access"
 append_var "XWORKMATE_BRIDGE_VALIDATION_BASE_URL" "xworkmate_bridge_validation_base_url"
 append_var "GATEWAY_OPENCLAW_PUBLIC_ACCESS"     "gateway_openclaw_public_access"
 append_var "VAULT_PUBLIC_ACCESS"                "vault_public_access"
+append_var "VAULT_DEPLOY_MODE"                  "vault_deploy_mode"
 append_var "XWORKSPACE_CONSOLE_ENABLE_XRDP"     "xworkspace_console_enable_xrdp"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
