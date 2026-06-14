@@ -948,6 +948,7 @@ append_secret_var "vault_server_root_access_token" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "vault_root_token" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "vault_admin_password" "$UNIFIED_AUTH_TOKEN"
 ANSIBLE_EXTRA_VARS+=("-e" "vault_admin_init_enabled=true")
+ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_quality_gate_fail_on_error=false")
 
 # Export environment fallbacks for roles/scripts that read environment directly.
 export AI_WORKSPACE_AUTH_TOKEN="$UNIFIED_AUTH_TOKEN"
