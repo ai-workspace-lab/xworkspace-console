@@ -32,6 +32,9 @@ XWORKSPACE_CONSOLE_REPO_URL=${XWORKSPACE_CONSOLE_REPO_URL:-"https://github.com/a
 XWORKSPACE_CONSOLE_DIR=${XWORKSPACE_CONSOLE_DIR:-""}
 XWORKSPACE_CORE_SKILLS_REPO_URL=${XWORKSPACE_CORE_SKILLS_REPO_URL:-"https://github.com/ai-workspace-lab/xworkspace-core-skills.git"}
 XWORKSPACE_CORE_SKILLS_DIR=${XWORKSPACE_CORE_SKILLS_DIR:-"/tmp/xworkspace-core-skills"}
+XWORKMATE_BRIDGE_REPO_URL=${XWORKMATE_BRIDGE_REPO_URL:-"https://github.com/ai-workspace-lab/xworkmate-bridge.git"}
+XWORKMATE_BRIDGE_BRANCH=${XWORKMATE_BRIDGE_BRANCH:-"release/v1.1.4"}
+XWORKMATE_BRIDGE_SOURCE_DIR=${XWORKMATE_BRIDGE_SOURCE_DIR:-"/tmp/xworkmate-bridge"}
 AUTH_TOKEN_FILE=${AI_WORKSPACE_AUTH_TOKEN_FILE:-"$HOME/.ai_workspace_auth_token"}
 VAULT_FILE=${AI_WORKSPACE_VAULT_PASSWORD_FILE:-"$HOME/.vault_password"}
 
@@ -519,6 +522,23 @@ ensure_core_skills_source() {
     [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ] || error "xworkspace core skills source missing: $XWORKSPACE_CORE_SKILLS_DIR/skills"
 }
 
+ensure_xworkmate_bridge_source() {
+    if [ -d "$XWORKMATE_BRIDGE_SOURCE_DIR/.git" ]; then
+        info "Updating xworkmate-bridge checkout at $XWORKMATE_BRIDGE_SOURCE_DIR..."
+        git -C "$XWORKMATE_BRIDGE_SOURCE_DIR" fetch origin
+        git -C "$XWORKMATE_BRIDGE_SOURCE_DIR" checkout "$XWORKMATE_BRIDGE_BRANCH"
+        git -C "$XWORKMATE_BRIDGE_SOURCE_DIR" reset --hard "origin/$XWORKMATE_BRIDGE_BRANCH"
+    elif [ -f "$XWORKMATE_BRIDGE_SOURCE_DIR/go.mod" ]; then
+        info "Using existing xworkmate-bridge source at $XWORKMATE_BRIDGE_SOURCE_DIR"
+    else
+        info "Cloning xworkmate-bridge to $XWORKMATE_BRIDGE_SOURCE_DIR..."
+        rm -rf "$XWORKMATE_BRIDGE_SOURCE_DIR"
+        git clone -b "$XWORKMATE_BRIDGE_BRANCH" "$XWORKMATE_BRIDGE_REPO_URL" "$XWORKMATE_BRIDGE_SOURCE_DIR"
+    fi
+
+    [ -f "$XWORKMATE_BRIDGE_SOURCE_DIR/go.mod" ] || error "xworkmate-bridge source missing: $XWORKMATE_BRIDGE_SOURCE_DIR/go.mod"
+}
+
 wait_for_url() {
     local url=$1
     local header=${2:-}
@@ -904,6 +924,7 @@ fi
 
 patch_playbook_user_systemd
 ensure_core_skills_source
+ensure_xworkmate_bridge_source
 
 # 3. Construct Ansible variables from Environment Variables
 ANSIBLE_EXTRA_VARS=()
