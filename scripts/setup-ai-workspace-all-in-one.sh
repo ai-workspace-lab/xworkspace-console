@@ -15,6 +15,8 @@ set -euo pipefail
 #   GATEWAY_OPENCLAW_PUBLIC_ACCESS
 #   VAULT_PUBLIC_ACCESS
 #   XWORKSPACE_CONSOLE_ENABLE_XRDP
+#   AI_WORKSPACE_RUNTIME_MODES (docker,systemd by default; docker and k3s are mutually exclusive)
+#   POSTGRESQL_DEPLOY_MODE (compose by default; native for apt/systemd)
 #   AI_WORKSPACE_AUTH_TOKEN / XWORKSPACE_CONSOLE_AUTH_TOKEN
 #     / XWORKMATE_BRIDGE_AUTH_TOKEN / BRIDGE_AUTH_TOKEN / INTERNAL_SERVICE_TOKEN
 #     / DEPLOY_TOKEN
@@ -577,78 +579,102 @@ service_status_line() {
     local unit_patterns=$2
     local port=${3:-}
     local detail="not detected"
-    local state="DOWN"
+    local state="inactive"
 
     if command -v systemctl >/dev/null 2>&1; then
         local unit
         for unit in $unit_patterns; do
+            if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
+                state="active"
+                detail="systemd-user:$unit"
+                break
+            fi
             if systemctl is-active --quiet "$unit" 2>/dev/null; then
-                state="OK"
+                state="active"
                 detail="systemd:$unit"
                 break
             fi
         done
     fi
 
-    if [ "$state" != "OK" ] && [ -n "$port" ]; then
+    if [ "$state" != "active" ] && [ -n "$port" ]; then
         if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$port )" 2>/dev/null | grep -q ":$port"; then
-            state="OK"
+            state="active"
             detail="port:$port"
         elif command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-            state="OK"
+            state="active"
             detail="port:$port"
         fi
     fi
 
-    printf '  - %-28s %s (%s)\n' "$label" "$state" "$detail"
+    printf '  %-28s : %-8s (%s)\n' "$label" "$state" "$detail"
 }
 
 cli_status_line() {
     local label=$1
     local bin=$2
-    local state="MISSING"
+    local state="missing"
     local detail="not in PATH"
 
     if command -v "$bin" >/dev/null 2>&1; then
-        state="OK"
-        detail="$(command -v "$bin")"
+        state="available"
+        detail="$("$bin" --version 2>/dev/null | head -n 1 || command -v "$bin")"
     fi
 
-    printf '  - %-28s %s (%s)\n' "$label" "$state" "$detail"
+    printf '  %-28s : %-9s (%s)\n' "$label" "$state" "$detail"
 }
 
 print_deployment_summary() {
     local domain=${SERVER_DOMAIN:-${XWORKMATE_BRIDGE_DOMAIN:-${BRIDGE_DOMAIN:-${ACP_BRIDGE_DOMAIN:-acp-bridge.onwalk.net}}}}
     local token=$1
+    local vault_token="${VAULT_SERVER_ROOT_ACCESS_TOKEN:-$token}"
+    local vault_token_display="$vault_token"
+    local bridge_url="https://${domain}"
+    local portal_url="http://127.0.0.1:17000"
+
+    if [ "${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}" != "true" ]; then
+        bridge_url="http://127.0.0.1:8787"
+    fi
+    if [ "$vault_token" = "$token" ]; then
+        vault_token_display="same as AI_WORKSPACE_AUTH_TOKEN"
+    fi
 
     cat <<EOF
 
-AI Workspace Deployment Summary
-Domain: ${domain}
-Token: ${token}
-XWorkMate Bridge: https://${domain}
+================ AI Workspace Deployment Summary ================
+[Access]
+  Workspace Portal (Console) : ${portal_url}
+  XWorkMate Bridge           : ${bridge_url}
 
-AI workspace (runtime desktop/browser):
+[One-time Credentials]
+  AI_WORKSPACE_AUTH_TOKEN    : ${token}
+  Vault root token           : ${vault_token_display}
+
+[Service Status]
 EOF
-    service_status_line "Runtime desktop/browser" "xworkspace-shell.service xworkspace-console.service display-manager.service gdm.service lightdm.service" "17000"
-    service_status_line "Workspace portal (console)" "xworkspace-console.service xworkspace-api.service" "17000"
-    service_status_line "XWorkMate Bridge (public)" "xworkmate-bridge.service xworkspace-bridge.service" "8787"
+    service_status_line "Portal / Console" "xworkspace-console.service xworkspace-api.service" "17000"
+    service_status_line "XWorkMate Bridge" "xworkmate-bridge.service xworkspace-bridge.service" "8787"
     service_status_line "OpenClaw" "xworkspace-openclaw.service openclaw-gateway.service openclaw.service" "18789"
     service_status_line "QMD" "qmd-mcp.service xworkspace-qmd.service qmd.service qdrant.service" "8181"
     service_status_line "Hermes" "acp-hermes.service xworkspace-hermes.service hermes.service" "3920"
-    service_status_line "PG" "postgresql.service postgresql@16-main.service postgresql@15-main.service xworkspace-postgres.service" "5432"
+    service_status_line "PostgreSQL" "postgresql.service postgresql@17-main.service postgresql@16-main.service postgresql@15-main.service xworkspace-postgres.service" "5432"
     service_status_line "Vault" "xworkspace-vault.service vault.service" "8200"
     service_status_line "LiteLLM" "xworkspace-litellm.service litellm-proxy.service litellm.service" "4000"
+    service_status_line "Runtime desktop/browser" "xworkspace-shell.service display-manager.service gdm.service lightdm.service" ""
 
     cat <<'EOF'
 
-Agent CLI:
+[Agent CLI]
 EOF
     cli_status_line "opencode" "opencode"
     cli_status_line "gemini" "gemini"
     cli_status_line "codex" "codex"
     cli_status_line "claude" "claude"
-    printf '\n'
+    cat <<'EOF'
+===============================================================
+
+Save the one-time credentials above in a private location.
+EOF
 }
 
 deploy_launch_agent() {
@@ -899,6 +925,7 @@ if [ "$OS_NAME" = "darwin" ] && [ "${AI_WORKSPACE_DARWIN_MODE:-local}" = "local"
     export VAULT_SERVER_ROOT_ACCESS_TOKEN="${VAULT_SERVER_ROOT_ACCESS_TOKEN:-$UNIFIED_AUTH_TOKEN}"
     export VAULT_ADMIN_PASSWORD="${VAULT_ADMIN_PASSWORD:-$UNIFIED_AUTH_TOKEN}"
     deploy_macos_local "$UNIFIED_AUTH_TOKEN"
+    print_deployment_summary "$UNIFIED_AUTH_TOKEN"
     exit 0
 fi
 
@@ -960,11 +987,14 @@ append_var "AI_WORKSPACE_SECURITY_LEVEL"        "ai_workspace_security_level"
 append_var "LITELLM_API_CADDY_STRICT_WHITELIST" "litellm_api_caddy_strict_whitelist"
 append_var "XWORKSPACE_CONSOLE_PUBLIC_ACCESS"   "xworkspace_console_public_access"
 append_var "XWORKMATE_BRIDGE_PUBLIC_ACCESS"     "xworkmate_bridge_public_access"
+append_var "XWORKMATE_BRIDGE_DOMAIN"            "xworkmate_bridge_domain"
 append_var "XWORKMATE_BRIDGE_VALIDATION_BASE_URL" "xworkmate_bridge_validation_base_url"
 append_var "GATEWAY_OPENCLAW_PUBLIC_ACCESS"     "gateway_openclaw_public_access"
 append_var "VAULT_PUBLIC_ACCESS"                "vault_public_access"
 append_var "VAULT_DEPLOY_MODE"                  "vault_deploy_mode"
 append_var "XWORKSPACE_CONSOLE_ENABLE_XRDP"     "xworkspace_console_enable_xrdp"
+append_var "AI_WORKSPACE_RUNTIME_MODES"         "ai_workspace_runtime_modes"
+append_var "POSTGRESQL_DEPLOY_MODE"             "postgresql_deploy_mode"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
 UNIFIED_AUTH_TOKEN="$(resolve_unified_auth_token)"
