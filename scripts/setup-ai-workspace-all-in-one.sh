@@ -5,7 +5,7 @@ set -euo pipefail
 # AI Workspace All-in-One Bootstrap Script
 # ==============================================================================
 # Usage:
-#   curl -sfL https://raw.githubusercontent.com/ai-workspace-infra/playbooks/main/setup-ai-workspace-all-in-one.sh | bash -
+#   curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
 #
 # Supported Environment Variables:
 #   AI_WORKSPACE_SECURITY_LEVEL

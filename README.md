@@ -72,6 +72,18 @@ See `docs/operations/service-port-plan.md` for the live-host inspection and migr
 
 ## Quick Start
 
+### AI Workspace All-in-One
+
+Recommended public bootstrap entry:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
+```
+
+Advanced parameter examples are documented in [`docs/SETUP_AI_WORKSPACE_ALL_IN_ONE.md`](docs/SETUP_AI_WORKSPACE_ALL_IN_ONE.md).
+
+### Local Desktop Console
+
 ```bash
 ./scripts/setup-xworkspace-desktop.sh
 ```
