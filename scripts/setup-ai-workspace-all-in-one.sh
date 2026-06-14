@@ -23,6 +23,7 @@ set -euo pipefail
 #       Unified auth token passed to xworkmate-bridge, LiteLLM, OpenClaw, and Vault.
 #   PLAYBOOK_DIR (optional local playbooks checkout; useful for macOS validation)
 #   XWORKSPACE_CONSOLE_DIR (optional local xworkspace-console checkout for macOS)
+#   QMD_SOURCE_REPO / LITELLM_SOURCE_REPO (optional local git sources for offline installs)
 #   AI_WORKSPACE_DARWIN_MODE=local (default on macOS) | ansible
 # ==============================================================================
 
@@ -995,6 +996,10 @@ append_var "VAULT_DEPLOY_MODE"                  "vault_deploy_mode"
 append_var "XWORKSPACE_CONSOLE_ENABLE_XRDP"     "xworkspace_console_enable_xrdp"
 append_var "AI_WORKSPACE_RUNTIME_MODES"         "ai_workspace_runtime_modes"
 append_var "POSTGRESQL_DEPLOY_MODE"             "postgresql_deploy_mode"
+append_var "QMD_SOURCE_REPO"                    "qmd_source_repo"
+append_var "QMD_VERSION"                        "qmd_version"
+append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
+append_var "LITELLM_VERSION"                    "litellm_version"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
 UNIFIED_AUTH_TOKEN="$(resolve_unified_auth_token)"

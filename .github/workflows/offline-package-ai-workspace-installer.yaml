@@ -1,0 +1,196 @@
+name: Build Offline AI Workspace All-in-One Package
+
+on:
+  push:
+    paths:
+      - 'scripts/create-ai-workspace-offline-package.sh'
+      - 'scripts/ai-workspace-offline-install.sh'
+      - '.github/workflows/offline-package-ai-workspace-installer.yaml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag. Leave empty to use offline-ai-workspace-<run_number>"
+        required: false
+        type: string
+      playbooks_ref:
+        description: "ai-workspace-infra/playbooks git ref"
+        required: false
+        default: "main"
+        type: string
+      console_ref:
+        description: "ai-workspace-lab/xworkspace-console git ref"
+        required: false
+        default: "main"
+        type: string
+      core_skills_ref:
+        description: "ai-workspace-lab/xworkspace-core-skills git ref"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-offline-ai-workspace-all-in-one
+  cancel-in-progress: false
+
+jobs:
+  build-offline-package:
+    name: Build ${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian
+            version: "13"
+            arch: amd64
+          - distro: debian
+            version: "13"
+            arch: arm64
+          - distro: debian
+            version: "12"
+            arch: amd64
+          - distro: debian
+            version: "12"
+            arch: arm64
+          - distro: debian
+            version: "11"
+            arch: amd64
+          - distro: debian
+            version: "11"
+            arch: arm64
+          - distro: ubuntu
+            version: "26.04"
+            arch: amd64
+          - distro: ubuntu
+            version: "26.04"
+            arch: arm64
+          - distro: ubuntu
+            version: "24.04"
+            arch: amd64
+          - distro: ubuntu
+            version: "24.04"
+            arch: arm64
+          - distro: ubuntu
+            version: "22.04"
+            arch: amd64
+          - distro: ubuntu
+            version: "22.04"
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable QEMU for cross-arch package collection
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y curl git jq python3-pip
+
+      - name: Build offline package
+        env:
+          DISTRO_ID: ${{ matrix.distro }}
+          DISTRO_VERSION: ${{ matrix.version }}
+          ARCH: ${{ matrix.arch }}
+          PLAYBOOKS_REF: ${{ github.event.inputs.playbooks_ref || 'main' }}
+          CONSOLE_REF: ${{ github.event.inputs.console_ref || 'main' }}
+          CORE_SKILLS_REF: ${{ github.event.inputs.core_skills_ref || 'main' }}
+          PACKAGE_VERSION: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/create-ai-workspace-offline-package.sh
+          scripts/create-ai-workspace-offline-package.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}
+          path: ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  test-offline-package:
+    needs: build-offline-package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian
+            version: "13"
+            arch: amd64
+          - distro: ubuntu
+            version: "24.04"
+            arch: amd64
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}
+          path: offline-test
+
+      - name: Verify offline package contents
+        run: |
+          set -euo pipefail
+          cd offline-test
+          tar -tzf ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}.tar.gz > contents.txt
+          grep -q 'scripts/ai-workspace-offline-install.sh' contents.txt
+          grep -q 'metadata/manifest.json' contents.txt
+          grep -q 'repos/playbooks' contents.txt
+          grep -q 'repos/xworkspace-console' contents.txt
+          grep -q 'packages/apt/Packages.gz' contents.txt
+
+  publish-release:
+    needs: test-offline-package
+    runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || format('offline-ai-workspace-{0}', github.run_number) }}
+      RSYNC_SSH_KEY: ${{ secrets.RSYNC_SSH_KEY }}
+      RSYNC_SSH_USER: ${{ secrets.RSYNC_SSH_USER }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      REMOTE_ROOT: /data/update-server/offline-package/ai-workspace
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          release_name: Build ${{ env.TAG_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: ai-workspace-all-in-one-offline-*
+          merge-multiple: true
+
+      - name: Upload packages to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          files: release-artifacts/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rsync packages to remote mirror
+        if: ${{ env.RSYNC_SSH_KEY != '' && env.RSYNC_SSH_USER != '' && env.VPS_HOST != '' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y rsync openssh-client
+          mkdir -p ~/.ssh
+          echo "$RSYNC_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          remote_dir="${REMOTE_ROOT}/${TAG_NAME}"
+          ssh -i ~/.ssh/id_rsa "${RSYNC_SSH_USER}@${VPS_HOST}" "mkdir -p '${remote_dir}'"
+          rsync -av -e "ssh -i ~/.ssh/id_rsa" release-artifacts/*.tar.gz \
+            "${RSYNC_SSH_USER}@${VPS_HOST}:${remote_dir}/"
