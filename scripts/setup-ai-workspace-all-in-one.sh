@@ -906,6 +906,12 @@ if ! command -v ansible-playbook >/dev/null 2>&1 || ! command -v git >/dev/null 
     install_prerequisites "$OS_NAME"
 fi
 
+export XWORKSPACE_CONSOLE_PUBLIC_ACCESS="${XWORKSPACE_CONSOLE_PUBLIC_ACCESS:-false}"
+export XWORKMATE_BRIDGE_PUBLIC_ACCESS="${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}"
+export GATEWAY_OPENCLAW_PUBLIC_ACCESS="${GATEWAY_OPENCLAW_PUBLIC_ACCESS:-false}"
+export VAULT_PUBLIC_ACCESS="${VAULT_PUBLIC_ACCESS:-false}"
+export XWORKMATE_BRIDGE_VALIDATION_BASE_URL="${XWORKMATE_BRIDGE_VALIDATION_BASE_URL:-http://127.0.0.1:8787}"
+
 # 2. Clone Repository
 if [ -n "$PLAYBOOK_DIR" ]; then
     [ -d "$PLAYBOOK_DIR" ] || error "PLAYBOOK_DIR does not exist: $PLAYBOOK_DIR"
@@ -953,6 +959,7 @@ append_var "AI_WORKSPACE_SECURITY_LEVEL"        "ai_workspace_security_level"
 append_var "LITELLM_API_CADDY_STRICT_WHITELIST" "litellm_api_caddy_strict_whitelist"
 append_var "XWORKSPACE_CONSOLE_PUBLIC_ACCESS"   "xworkspace_console_public_access"
 append_var "XWORKMATE_BRIDGE_PUBLIC_ACCESS"     "xworkmate_bridge_public_access"
+append_var "XWORKMATE_BRIDGE_VALIDATION_BASE_URL" "xworkmate_bridge_validation_base_url"
 append_var "GATEWAY_OPENCLAW_PUBLIC_ACCESS"     "gateway_openclaw_public_access"
 append_var "VAULT_PUBLIC_ACCESS"                "vault_public_access"
 append_var "XWORKSPACE_CONSOLE_ENABLE_XRDP"     "xworkspace_console_enable_xrdp"
