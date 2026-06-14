@@ -30,6 +30,8 @@ TARGET_DIR=${TARGET_DIR:-"/tmp/ai-workspace-deploy"}
 PLAYBOOK_DIR=${PLAYBOOK_DIR:-""}
 XWORKSPACE_CONSOLE_REPO_URL=${XWORKSPACE_CONSOLE_REPO_URL:-"https://github.com/ai-workspace-lab/xworkspace-console.git"}
 XWORKSPACE_CONSOLE_DIR=${XWORKSPACE_CONSOLE_DIR:-""}
+XWORKSPACE_CORE_SKILLS_REPO_URL=${XWORKSPACE_CORE_SKILLS_REPO_URL:-"https://github.com/ai-workspace-lab/xworkspace-core-skills.git"}
+XWORKSPACE_CORE_SKILLS_DIR=${XWORKSPACE_CORE_SKILLS_DIR:-"/tmp/xworkspace-core-skills"}
 AUTH_TOKEN_FILE=${AI_WORKSPACE_AUTH_TOKEN_FILE:-"$HOME/.ai_workspace_auth_token"}
 VAULT_FILE=${AI_WORKSPACE_VAULT_PASSWORD_FILE:-"$HOME/.vault_password"}
 
@@ -501,6 +503,22 @@ if updated != text:
 PY
 }
 
+ensure_core_skills_source() {
+    if [ -d "$XWORKSPACE_CORE_SKILLS_DIR/.git" ]; then
+        info "Updating xworkspace-core-skills checkout at $XWORKSPACE_CORE_SKILLS_DIR..."
+        git -C "$XWORKSPACE_CORE_SKILLS_DIR" fetch origin
+        git -C "$XWORKSPACE_CORE_SKILLS_DIR" reset --hard origin/main
+    elif [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
+        info "Using existing xworkspace-core-skills directory at $XWORKSPACE_CORE_SKILLS_DIR"
+    else
+        info "Cloning xworkspace-core-skills to $XWORKSPACE_CORE_SKILLS_DIR..."
+        rm -rf "$XWORKSPACE_CORE_SKILLS_DIR"
+        git clone "$XWORKSPACE_CORE_SKILLS_REPO_URL" "$XWORKSPACE_CORE_SKILLS_DIR"
+    fi
+
+    [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ] || error "xworkspace core skills source missing: $XWORKSPACE_CORE_SKILLS_DIR/skills"
+}
+
 wait_for_url() {
     local url=$1
     local header=${2:-}
@@ -883,6 +901,7 @@ else
 fi
 
 patch_playbook_user_systemd
+ensure_core_skills_source
 
 # 3. Construct Ansible variables from Environment Variables
 ANSIBLE_EXTRA_VARS=()
