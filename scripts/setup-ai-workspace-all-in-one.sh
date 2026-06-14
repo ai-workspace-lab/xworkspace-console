@@ -70,9 +70,13 @@ install_prerequisites() {
     if [ "$os" = "linux" ]; then
         if [ -f /etc/debian_version ]; then
             sudo apt-get update -y
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl software-properties-common
-            sudo apt-add-repository --yes --update ppa:ansible/ansible
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ansible
+            if grep -qi ubuntu /etc/os-release 2>/dev/null; then
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl software-properties-common
+                sudo apt-add-repository --yes --update ppa:ansible/ansible
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ansible
+            else
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ansible
+            fi
         elif [ -f /etc/redhat-release ]; then
             sudo yum install -y epel-release
             sudo yum install -y git curl ansible
