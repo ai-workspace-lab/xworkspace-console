@@ -106,13 +106,28 @@ download_apt_packages() {
     bash -lc "$(cat <<'CONTAINER'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+
+retry_command() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if "$@"; then
+      return 0
+    fi
+    if [ "${attempt}" -lt 5 ]; then
+      echo "Command failed (attempt ${attempt}/5), retrying: $*" >&2
+      sleep $((attempt * 3))
+    fi
+  done
+  return 1
+}
+
 cat > /etc/apt/apt.conf.d/80-ai-workspace-retries <<'EOF'
 Acquire::Retries "5";
 Acquire::http::Timeout "30";
 Acquire::https::Timeout "30";
 EOF
-apt-get update -y
-apt-get install -y ca-certificates curl gnupg dpkg-dev apt-transport-https
+retry_command apt-get update -y
+retry_command apt-get install -y ca-certificates curl gnupg dpkg-dev apt-transport-https
 
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o /etc/apt/keyrings/nodesource.asc
@@ -138,7 +153,7 @@ if curl -fsSL https://download.docker.com/linux/${DISTRO_ID}/gpg -o /etc/apt/key
     > /etc/apt/sources.list.d/docker.list
 fi
 
-apt-get update -y
+retry_command apt-get update -y
 
 required_packages=(
   ansible git curl ca-certificates gnupg jq rsync unzip wget xdg-utils
@@ -229,16 +244,16 @@ elif apt-cache show docker.io >/dev/null 2>&1; then
   fi
 fi
 
-apt-get install --download-only -y --no-install-recommends "${packages[@]}"
-apt-get download "nodejs=${NODEJS_22_VERSION}-1nodesource1"
-apt-get download "nodejs=${NODEJS_24_VERSION}-1nodesource1"
+retry_command apt-get install --download-only -y --no-install-recommends "${packages[@]}"
+retry_command apt-get download "nodejs=${NODEJS_22_VERSION}-1nodesource1"
+retry_command apt-get download "nodejs=${NODEJS_24_VERSION}-1nodesource1"
 cp -n ./*.deb /offline-apt/ 2>/dev/null || true
 find /var/cache/apt/archives -name '*.deb' -exec cp -n {} /offline-apt/ \;
 cd /offline-apt
 dpkg-scanpackages --multiversion . /dev/null | gzip -9c > Packages.gz
 find . -maxdepth 1 -name '*.deb' -printf '%f\n' | sort > /offline-meta/deb-files.txt
 
-apt-get install -y --no-install-recommends \
+retry_command apt-get install -y --no-install-recommends \
   build-essential git libpq-dev python3 python3-dev python3-pip python3-venv
 python_bin=python3
 if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "ubuntu:26.04" ]; then
@@ -258,7 +273,8 @@ if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "ubuntu:26.04" ]; then
     echo "Portable Python ${PORTABLE_PYTHON_VERSION} was not installed." >&2
     exit 1
   fi
-  PIP_BREAK_SYSTEM_PACKAGES=1 "${python_bin}" -m ensurepip --upgrade
+  find /offline-python -name EXTERNALLY-MANAGED -delete
+  "${python_bin}" -m ensurepip --upgrade
 fi
 "${python_bin}" -m venv /tmp/ai-workspace-wheel-builder
 /tmp/ai-workspace-wheel-builder/bin/pip install --upgrade pip setuptools wheel
