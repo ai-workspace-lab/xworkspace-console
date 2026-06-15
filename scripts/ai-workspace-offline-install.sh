@@ -6,6 +6,7 @@ APT_DIR="${ROOT}/packages/apt"
 BIN_DIR="${ROOT}/packages/bin"
 IMAGE_DIR="${ROOT}/packages/images"
 NPM_CACHE_DIR="${ROOT}/packages/npm-cache"
+NPM_RUNTIME_CACHE_DIR="${AI_WORKSPACE_NPM_CACHE_DIR:-/var/cache/ai-workspace/npm}"
 PIP_WHEEL_DIR="${ROOT}/packages/pip"
 STATE_DIR="${AI_WORKSPACE_OFFLINE_STATE_DIR:-/var/lib/ai-workspace/offline}"
 AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT="${AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT:-1800}"
@@ -209,16 +210,43 @@ load_container_images() {
 
 configure_language_package_caches() {
   if [ -d "${NPM_CACHE_DIR}" ]; then
+    local cache_group="ai-workspace-cache"
+    local cache_user="${AI_WORKSPACE_RUNTIME_USER:-ubuntu}"
+    local seed_checksum marker
+
+    getent group "${cache_group}" >/dev/null 2>&1 || groupadd --system "${cache_group}"
+    if [ "${cache_user}" != "root" ] && ! id "${cache_user}" >/dev/null 2>&1; then
+      useradd --create-home --shell /bin/bash "${cache_user}"
+    fi
+    if [ "${cache_user}" != "root" ]; then
+      usermod --append --groups "${cache_group}" "${cache_user}"
+    fi
+
+    seed_checksum="$(sha256sum "${ROOT}/metadata/manifest.json" | awk '{print $1}')"
+    marker="${NPM_RUNTIME_CACHE_DIR}/.ai-workspace-seed-sha256"
+    if [ "$(cat "${marker}" 2>/dev/null || true)" != "${seed_checksum}" ]; then
+      info "Seeding shared npm cache from the offline package"
+      rm -rf "${NPM_RUNTIME_CACHE_DIR}"
+      mkdir -p "${NPM_RUNTIME_CACHE_DIR}"
+      cp -a "${NPM_CACHE_DIR}/." "${NPM_RUNTIME_CACHE_DIR}/"
+      printf '%s\n' "${seed_checksum}" > "${marker}"
+    else
+      info "Reusing shared npm cache at ${NPM_RUNTIME_CACHE_DIR}"
+    fi
+    chown -R "root:${cache_group}" "${NPM_RUNTIME_CACHE_DIR}"
+    find "${NPM_RUNTIME_CACHE_DIR}" -type d -exec chmod 2770 {} +
+    find "${NPM_RUNTIME_CACHE_DIR}" -type f -exec chmod 0660 {} +
+
     info "Configuring npm to prefer bundled cache"
     touch /etc/npmrc
     local npmrc_tmp
     npmrc_tmp="$(mktemp)"
     awk -F= '$1 != "cache" && $1 != "prefer-offline" { print }' /etc/npmrc > "${npmrc_tmp}"
-    printf 'cache=%s\nprefer-offline=true\n' "${NPM_CACHE_DIR}" >> "${npmrc_tmp}"
+    printf 'cache=%s\nprefer-offline=true\n' "${NPM_RUNTIME_CACHE_DIR}" >> "${npmrc_tmp}"
     install -m 0644 "${npmrc_tmp}" /etc/npmrc
     rm -f "${npmrc_tmp}"
     if command -v npm >/dev/null 2>&1; then
-      npm config set cache "${NPM_CACHE_DIR}" --global || true
+      npm config set cache "${NPM_RUNTIME_CACHE_DIR}" --global || true
       npm config set prefer-offline true --global || true
     fi
   fi
