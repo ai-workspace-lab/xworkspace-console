@@ -27,6 +27,7 @@ TTYD_VERSION="${TTYD_VERSION:-latest}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17.7}"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.6.6}"
 PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION:-1.60.0}"
+GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION:-149.0.7827.114-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -86,6 +87,7 @@ download_apt_packages() {
     -e NODEJS_MAJOR_VERSIONS="${NODEJS_MAJOR_VERSIONS}" \
     -e NODEJS_22_VERSION="${NODEJS_22_VERSION}" \
     -e NODEJS_24_VERSION="${NODEJS_24_VERSION}" \
+    -e GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION}" \
     -v "${apt_dir}:/offline-apt" \
     -v "${apt_lists}:/offline-meta" \
     "${image}" \
@@ -101,10 +103,12 @@ for major in ${NODEJS_MAJOR_VERSIONS}; do
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${major}.x nodistro main" \
     > "/etc/apt/sources.list.d/nodesource-node${major}.list"
 done
-curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-  | gpg --dearmor -o /etc/apt/keyrings/google-linux-signing-key.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/google-linux-signing-key.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
-  > /etc/apt/sources.list.d/google-chrome.list
+if [ "$(dpkg --print-architecture)" = "amd64" ]; then
+  curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+    | gpg --dearmor -o /etc/apt/keyrings/google-linux-signing-key.gpg
+  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-linux-signing-key.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+    > /etc/apt/sources.list.d/google-chrome.list
+fi
 curl -fsSL https://dl.yarnpkg.com/debian/pubkey.gpg -o /etc/apt/keyrings/yarn.asc
 echo "deb [signed-by=/etc/apt/keyrings/yarn.asc] https://dl.yarnpkg.com/debian/ stable main" \
   > /etc/apt/sources.list.d/yarn.list
@@ -118,14 +122,66 @@ fi
 apt-get update -y || true
 
 required_packages=(
-  ansible git curl ca-certificates gnupg jq rsync unzip wget
-)
-optional_packages=(
+  ansible git curl ca-certificates gnupg jq rsync unzip wget xdg-utils
   caddy xfce4 python3 python3-pip python3-venv python3-dev python3-setuptools
-  build-essential pkg-config python-is-python3 pandoc fonts-noto-cjk
+  build-essential pkg-config python-is-python3 pandoc nodejs yarn golang-go
+  texlive-xetex texlive-latex-extra texlive-fonts-recommended
+  texlive-lang-chinese latexmk fonts-noto-cjk
   fonts-noto-cjk-extra fonts-wqy-zenhei fonts-wqy-microhei
-  google-chrome-stable nodejs yarn
 )
+
+resolve_required_package() {
+  local candidate
+  for candidate in "$@"; do
+    if apt-cache show "${candidate}" >/dev/null 2>&1; then
+      printf '%s\n' "${candidate}"
+      return
+    fi
+  done
+  echo "Required APT package is unavailable for this target: $*" >&2
+  exit 1
+}
+
+case "$(dpkg --print-architecture)" in
+  amd64)
+    if ! apt-cache show "google-chrome-stable=${GOOGLE_CHROME_VERSION}" >/dev/null 2>&1; then
+      echo "Required Google Chrome version is unavailable: ${GOOGLE_CHROME_VERSION}" >&2
+      exit 1
+    fi
+    ;;
+  arm64)
+    browser_dependency_groups=(
+      "libasound2 libasound2t64"
+      "libatk-bridge2.0-0 libatk-bridge2.0-0t64"
+      "libatk1.0-0 libatk1.0-0t64"
+      "libatspi2.0-0 libatspi2.0-0t64"
+      "libcairo2"
+      "libcups2 libcups2t64"
+      "libdbus-1-3"
+      "libdrm2"
+      "libgbm1"
+      "libglib2.0-0 libglib2.0-0t64"
+      "libnspr4"
+      "libnss3"
+      "libpango-1.0-0"
+      "libx11-6"
+      "libxcb1"
+      "libxcomposite1"
+      "libxdamage1"
+      "libxext6"
+      "libxfixes3"
+      "libxkbcommon0"
+      "libxrandr2"
+    )
+    : > /offline-meta/browser-deb-packages.txt
+    for dependency_group in "${browser_dependency_groups[@]}"; do
+      read -r -a dependency_candidates <<<"${dependency_group}"
+      resolved_dependency="$(resolve_required_package "${dependency_candidates[@]}")"
+      required_packages+=("${resolved_dependency}")
+      printf '%s\n' "${resolved_dependency}" >> /offline-meta/browser-deb-packages.txt
+    done
+    ;;
+esac
 packages=()
 
 for package in "${required_packages[@]}"; do
@@ -136,13 +192,9 @@ for package in "${required_packages[@]}"; do
   packages+=("${package}")
 done
 
-for package in "${optional_packages[@]}"; do
-  if apt-cache show "${package}" >/dev/null 2>&1; then
-    packages+=("${package}")
-  else
-    echo "Skipping unavailable optional APT package: ${package}" >&2
-  fi
-done
+if [ "$(dpkg --print-architecture)" = "amd64" ]; then
+  packages+=("google-chrome-stable=${GOOGLE_CHROME_VERSION}")
+fi
 
 if apt-cache show docker-ce >/dev/null 2>&1; then
   packages+=(docker-ce docker-ce-cli containerd.io)
@@ -158,25 +210,16 @@ elif apt-cache show docker.io >/dev/null 2>&1; then
   fi
 fi
 
-if apt-cache show golang-go >/dev/null 2>&1; then
-  packages+=(golang-go)
-fi
-if apt-cache show texlive-xetex >/dev/null 2>&1; then
-  packages+=(texlive-xetex texlive-latex-extra texlive-fonts-recommended texlive-lang-chinese latexmk)
-fi
-
 apt-get install --download-only -y --no-install-recommends "${packages[@]}"
-apt-get download "nodejs=${NODEJS_22_VERSION}-1nodesource1" || true
-apt-get download "nodejs=${NODEJS_24_VERSION}-1nodesource1" || true
+apt-get download "nodejs=${NODEJS_22_VERSION}-1nodesource1"
+apt-get download "nodejs=${NODEJS_24_VERSION}-1nodesource1"
 cp -n ./*.deb /offline-apt/ 2>/dev/null || true
 find /var/cache/apt/archives -name '*.deb' -exec cp -n {} /offline-apt/ \;
 cd /offline-apt
-dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz
+dpkg-scanpackages --multiversion . /dev/null | gzip -9c > Packages.gz
 find . -maxdepth 1 -name '*.deb' -printf '%f\n' | sort > /offline-meta/deb-files.txt
 CONTAINER
-)" \
-    -e DISTRO_ID="${DISTRO_ID}" \
-    -e NODEJS_MAJOR_VERSIONS="${NODEJS_MAJOR_VERSIONS}"
+)"
 }
 
 download_npm_packages() {
@@ -197,6 +240,68 @@ download_npm_packages() {
   npm cache add --cache "${npm_cache_dir}" "openclaw@${OPENCLAW_VERSION}"
   npm cache add --cache "${npm_cache_dir}" "@openclaw/codex@${OPENCLAW_VERSION}"
   npm cache add --cache "${npm_cache_dir}" "playwright@${PLAYWRIGHT_VERSION}"
+}
+
+warm_npm_dependency_cache() {
+  local npm_cache_dir="${WORKDIR}/packages/npm-cache"
+  docker run --rm --platform "linux/${ARCH}" \
+    -e OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
+    -e PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION}" \
+    -v "${npm_cache_dir}:/offline-cache" \
+    -v "${WORKDIR}/repos/xworkspace-console/dashboard:/sources/dashboard:ro" \
+    -v "${WORKDIR}/repos/qmd:/sources/qmd:ro" \
+    node:24-bookworm \
+    bash -lc "$(cat <<'CONTAINER'
+set -euo pipefail
+export npm_config_cache=/offline-cache
+export npm_config_audit=false
+export npm_config_fund=false
+
+mkdir -p /tmp/projects
+cp -a /sources/dashboard /tmp/projects/dashboard
+cp -a /sources/qmd /tmp/projects/qmd
+
+(
+  cd /tmp/projects/dashboard
+  npm ci --ignore-scripts --no-audit --no-fund
+)
+(
+  cd /tmp/projects/qmd
+  npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+)
+
+npm install --ignore-scripts --no-audit --no-fund --prefix /tmp/global \
+  opencode-ai \
+  @google/gemini-cli \
+  @openai/codex \
+  @anthropic-ai/claude-code \
+  "openclaw@${OPENCLAW_VERSION}" \
+  "@openclaw/codex@${OPENCLAW_VERSION}" \
+  "playwright@${PLAYWRIGHT_VERSION}"
+CONTAINER
+)"
+}
+
+download_playwright_browser() {
+  if [ "${ARCH}" != "arm64" ]; then
+    return
+  fi
+
+  local browser_dir="${WORKDIR}/packages/playwright-browsers"
+  mkdir -p "${browser_dir}"
+  docker run --rm --platform "linux/${ARCH}" \
+    -e PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION}" \
+    -e PLAYWRIGHT_BROWSERS_PATH=/offline-browsers \
+    -v "${browser_dir}:/offline-browsers" \
+    node:24-bookworm \
+    bash -lc 'npx --yes "playwright@${PLAYWRIGHT_VERSION}" install chromium'
+
+  if ! find "${browser_dir}" -type f \
+      \( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \) \
+      -print -quit | grep -q .; then
+    echo "Bundled Playwright Chromium executable was not found for ${ARCH}" >&2
+    exit 1
+  fi
 }
 
 download_pip_wheels() {
@@ -230,6 +335,20 @@ download_binaries() {
       -o "${bin_dir}/ttyd.${ttyd_arch}"
   fi
   chmod +x "${bin_dir}/ttyd.${ttyd_arch}"
+}
+
+build_xworkmate_bridge_binary() {
+  local bin_dir="${WORKDIR}/packages/bin"
+  mkdir -p "${bin_dir}"
+  docker run --rm --platform "linux/${ARCH}" \
+    -e GOOS=linux \
+    -e GOARCH="${ARCH}" \
+    -e CGO_ENABLED=0 \
+    -v "${WORKDIR}/repos/xworkmate-bridge:/src:ro" \
+    -v "${bin_dir}:/out" \
+    golang:1.25-bookworm \
+    bash -lc 'cd /src && go build -trimpath -o "/out/xworkmate-go-core.${GOARCH}" .'
+  chmod +x "${bin_dir}/xworkmate-go-core.${ARCH}"
 }
 
 export_container_images() {
@@ -268,6 +387,7 @@ EOF
     "vault": "${VAULT_VERSION}",
     "openclaw": "${OPENCLAW_VERSION}",
     "playwright": "${PLAYWRIGHT_VERSION}",
+    "googleChrome": "${GOOGLE_CHROME_VERSION}",
     "postgresImage": "${POSTGRES_IMAGE}"
   }
 }
@@ -293,8 +413,11 @@ main() {
 
   download_apt_packages "${image}"
   download_npm_packages
+  warm_npm_dependency_cache
+  download_playwright_browser
   download_pip_wheels
   download_binaries
+  build_xworkmate_bridge_binary
   export_container_images
 
   cp "${SCRIPT_DIR}/ai-workspace-offline-install.sh" "${WORKDIR}/scripts/"

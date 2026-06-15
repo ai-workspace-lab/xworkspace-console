@@ -128,6 +128,12 @@ jobs:
           - distro: ubuntu
             version: "24.04"
             arch: amd64
+          - distro: debian
+            version: "13"
+            arch: arm64
+          - distro: ubuntu
+            version: "24.04"
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -175,6 +181,10 @@ jobs:
           grep -q 'repos/playbooks' contents.txt
           grep -q 'repos/xworkspace-console' contents.txt
           grep -q 'packages/apt/Packages.gz' contents.txt
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            grep -Eq 'packages/playwright-browsers/.*/chrome-linux(64)?/chrome$' contents.txt
+            grep -q 'metadata/apt/browser-deb-packages.txt' contents.txt
+          fi
 
   publish-release:
     needs: test-offline-package

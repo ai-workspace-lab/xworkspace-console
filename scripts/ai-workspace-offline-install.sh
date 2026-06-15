@@ -8,10 +8,14 @@ IMAGE_DIR="${ROOT}/packages/images"
 NPM_CACHE_DIR="${ROOT}/packages/npm-cache"
 NPM_RUNTIME_CACHE_DIR="${AI_WORKSPACE_NPM_CACHE_DIR:-/var/cache/ai-workspace/npm}"
 PIP_WHEEL_DIR="${ROOT}/packages/pip"
+PLAYWRIGHT_BROWSER_DIR="${ROOT}/packages/playwright-browsers"
+PLAYWRIGHT_BROWSER_INSTALL_DIR="${AI_WORKSPACE_PLAYWRIGHT_BROWSER_DIR:-/opt/ai-workspace/playwright-browsers}"
 STATE_DIR="${AI_WORKSPACE_OFFLINE_STATE_DIR:-/var/lib/ai-workspace/offline}"
 AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT="${AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT:-1800}"
 AI_WORKSPACE_APT_LOCK_TIMEOUT="${AI_WORKSPACE_APT_LOCK_TIMEOUT:-900}"
 APT_SOURCE_FILE="/etc/apt/sources.list.d/ai-workspace-offline.list"
+APT_CONFIG_FILE="/etc/apt/apt.conf.d/99ai-workspace-offline"
+BROWSER_APT_PACKAGE_FILE="${ROOT}/metadata/apt/browser-deb-packages.txt"
 SAFE_GIT_DIRS=()
 APT_LOCAL_OPTIONS=(
   -o "Dir::Etc::sourcelist=sources.list.d/ai-workspace-offline.list"
@@ -28,7 +32,7 @@ warn() {
 }
 
 cleanup() {
-  rm -f "${APT_SOURCE_FILE}"
+  rm -f "${APT_SOURCE_FILE}" "${APT_CONFIG_FILE}"
   local git_dir
   for git_dir in "${SAFE_GIT_DIRS[@]}"; do
     git config --system --unset-all safe.directory "${git_dir}" >/dev/null 2>&1 || true
@@ -118,6 +122,12 @@ configure_local_apt_repo() {
   cat > "${APT_SOURCE_FILE}" <<EOF
 deb [trusted=yes] file:${APT_DIR} ./
 EOF
+  cat > "${APT_CONFIG_FILE}" <<'EOF'
+Dir::Etc::sourcelist "sources.list.d/ai-workspace-offline.list";
+Dir::Etc::sourceparts "-";
+APT::Get::List-Cleanup "0";
+Acquire::Languages "none";
+EOF
   apt-get "${APT_LOCAL_OPTIONS[@]}" update
 }
 
@@ -146,6 +156,17 @@ append_available_package() {
 
 install_offline_prerequisites() {
   local packages=(git curl ansible ca-certificates unzip)
+  local browser_package
+
+  if [ -d "${PLAYWRIGHT_BROWSER_DIR}" ] && [ ! -s "${BROWSER_APT_PACKAGE_FILE}" ]; then
+    echo "Bundled Playwright Chromium dependency manifest is missing." >&2
+    exit 1
+  fi
+  if [ -d "${PLAYWRIGHT_BROWSER_DIR}" ]; then
+    while IFS= read -r browser_package; do
+      [ -n "${browser_package}" ] && packages+=("${browser_package}")
+    done < "${BROWSER_APT_PACKAGE_FILE}"
+  fi
 
   if ! command -v docker >/dev/null 2>&1; then
     if apt-cache "${APT_LOCAL_OPTIONS[@]}" show docker-ce >/dev/null 2>&1; then
@@ -182,6 +203,57 @@ install_bundled_binaries() {
     info "Installing bundled ttyd binary"
     install -m 0755 "${BIN_DIR}/ttyd.${ttyd_arch}" /usr/local/bin/ttyd
   fi
+
+  case "$(uname -m)" in
+    x86_64|amd64) bridge_arch=amd64 ;;
+    aarch64|arm64) bridge_arch=arm64 ;;
+    *) bridge_arch="" ;;
+  esac
+  if [ -n "${bridge_arch}" ] && [ -f "${BIN_DIR}/xworkmate-go-core.${bridge_arch}" ]; then
+    info "Installing bundled XWorkmate Bridge binary"
+    local bridge_immutable=false
+    if command -v lsattr >/dev/null 2>&1 &&
+       lsattr /usr/local/bin/xworkmate-go-core 2>/dev/null | awk '{print $1}' | grep -q 'i'; then
+      bridge_immutable=true
+      chattr -i /usr/local/bin/xworkmate-go-core
+    fi
+    install -m 0755 "${BIN_DIR}/xworkmate-go-core.${bridge_arch}" /usr/local/bin/xworkmate-go-core
+    if [ "${bridge_immutable}" = "true" ]; then
+      chattr +i /usr/local/bin/xworkmate-go-core
+    fi
+  fi
+}
+
+install_bundled_playwright_browser() {
+  if [ ! -d "${PLAYWRIGHT_BROWSER_DIR}" ]; then
+    return
+  fi
+
+  local seed_checksum marker browser_binary
+  seed_checksum="$(sha256sum "${ROOT}/metadata/manifest.json" | awk '{print $1}')"
+  marker="${PLAYWRIGHT_BROWSER_INSTALL_DIR}/.ai-workspace-seed-sha256"
+  if [ "$(cat "${marker}" 2>/dev/null || true)" != "${seed_checksum}" ]; then
+    info "Installing bundled Playwright Chromium runtime"
+    rm -rf "${PLAYWRIGHT_BROWSER_INSTALL_DIR}"
+    mkdir -p "${PLAYWRIGHT_BROWSER_INSTALL_DIR}"
+    cp -a "${PLAYWRIGHT_BROWSER_DIR}/." "${PLAYWRIGHT_BROWSER_INSTALL_DIR}/"
+    printf '%s\n' "${seed_checksum}" > "${marker}"
+  else
+    info "Reusing bundled Playwright Chromium runtime"
+  fi
+
+  chown -R root:root "${PLAYWRIGHT_BROWSER_INSTALL_DIR}"
+  chmod -R a+rX "${PLAYWRIGHT_BROWSER_INSTALL_DIR}"
+  browser_binary="$(
+    find "${PLAYWRIGHT_BROWSER_INSTALL_DIR}" -type f \
+      \( -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' \) \
+      -print -quit
+  )"
+  if [ -z "${browser_binary}" ] || [ ! -x "${browser_binary}" ]; then
+    echo "Bundled Playwright Chromium executable is missing." >&2
+    exit 1
+  fi
+  ln -sfn "${browser_binary}" /usr/local/bin/chromium
 }
 
 load_container_images() {
@@ -282,6 +354,7 @@ run_bootstrap() {
   export GATEWAY_OPENCLAW_PUBLIC_ACCESS="${GATEWAY_OPENCLAW_PUBLIC_ACCESS:-false}"
   export VAULT_PUBLIC_ACCESS="${VAULT_PUBLIC_ACCESS:-false}"
   export AI_WORKSPACE_OFFLINE_ACTIVE=true
+  export AI_WORKSPACE_USE_PREBUILT_BRIDGE=true
   export AI_WORKSPACE_DEPLOYMENT_LOCK_HELD=true
   export AI_WORKSPACE_APT_LOCK_TIMEOUT
 
@@ -298,6 +371,7 @@ main() {
   install_offline_prerequisites
   configure_local_git_sources
   install_bundled_binaries
+  install_bundled_playwright_browser
   load_container_images
   configure_language_package_caches
   run_bootstrap
