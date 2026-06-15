@@ -336,7 +336,6 @@ build_xworkmate_bridge_binary() {
     -v "${bin_dir}:/out" \
     golang:1.25-bookworm \
     bash -lc 'cd /src && /usr/local/go/bin/go build -trimpath -o "/out/xworkmate-go-core.${GOARCH}" .'
-  chmod +x "${bin_dir}/xworkmate-go-core.${ARCH}"
 }
 
 export_container_images() {
