@@ -288,7 +288,7 @@ resolve_offline_source_url() {
     local location
 
     case "$source" in
-        http://*|https://*)
+        https://github.com/*/releases/latest/download/*)
             location="$(
                 curl -sSI --connect-timeout 15 --max-time 30 "$source" 2>/dev/null |
                     tr -d '\r' |
