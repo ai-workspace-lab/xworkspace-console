@@ -106,6 +106,11 @@ download_apt_packages() {
     bash -lc "$(cat <<'CONTAINER'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+cat > /etc/apt/apt.conf.d/80-ai-workspace-retries <<'EOF'
+Acquire::Retries "5";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+EOF
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg dpkg-dev apt-transport-https
 
@@ -253,7 +258,7 @@ if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "ubuntu:26.04" ]; then
     echo "Portable Python ${PORTABLE_PYTHON_VERSION} was not installed." >&2
     exit 1
   fi
-  "${python_bin}" -m ensurepip --upgrade
+  PIP_BREAK_SYSTEM_PACKAGES=1 "${python_bin}" -m ensurepip --upgrade
 fi
 "${python_bin}" -m venv /tmp/ai-workspace-wheel-builder
 /tmp/ai-workspace-wheel-builder/bin/pip install --upgrade pip setuptools wheel
