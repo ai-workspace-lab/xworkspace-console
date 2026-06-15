@@ -18,6 +18,7 @@ QMD_REPO="${QMD_REPO:-https://github.com/ai-workspace-services/qmd.git}"
 QMD_REF="${QMD_REF:-main}"
 LITELLM_REPO="${LITELLM_REPO:-https://github.com/ai-workspace-services/litellm.git}"
 LITELLM_REF="${LITELLM_REF:-litellm_internal_staging}"
+LITELLM_DEBIAN_11_VERSION="${LITELLM_DEBIAN_11_VERSION:-1.74.9}"
 
 NODEJS_MAJOR_VERSIONS="${NODEJS_MAJOR_VERSIONS:-22 24}"
 NODEJS_22_VERSION="${NODEJS_22_VERSION:-22.22.3}"
@@ -85,10 +86,12 @@ download_apt_packages() {
 
   docker run --rm --platform "${platform}" \
     -e DISTRO_ID="${DISTRO_ID}" \
+    -e DISTRO_VERSION="${DISTRO_VERSION}" \
     -e NODEJS_MAJOR_VERSIONS="${NODEJS_MAJOR_VERSIONS}" \
     -e NODEJS_22_VERSION="${NODEJS_22_VERSION}" \
     -e NODEJS_24_VERSION="${NODEJS_24_VERSION}" \
     -e GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION}" \
+    -e LITELLM_DEBIAN_11_VERSION="${LITELLM_DEBIAN_11_VERSION}" \
     -v "${apt_dir}:/offline-apt" \
     -v "${apt_lists}:/offline-meta" \
     -v "${wheel_dir}:/offline-pip" \
@@ -228,9 +231,13 @@ apt-get install -y --no-install-recommends \
   build-essential git libpq-dev python3 python3-dev python3-pip python3-venv
 python3 -m venv /tmp/ai-workspace-wheel-builder
 /tmp/ai-workspace-wheel-builder/bin/pip install --upgrade pip setuptools wheel
+litellm_package_spec="/litellm-src[proxy]"
+if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "debian:11" ]; then
+  litellm_package_spec="litellm[proxy]==${LITELLM_DEBIAN_11_VERSION}"
+fi
 /tmp/ai-workspace-wheel-builder/bin/pip wheel \
   --wheel-dir /offline-pip \
-  "/litellm-src[proxy]" \
+  "${litellm_package_spec}" \
   prisma \
   psycopg2-binary
 CONTAINER
@@ -335,7 +342,7 @@ build_xworkmate_bridge_binary() {
     -v "${WORKDIR}/repos/xworkmate-bridge:/src:ro" \
     -v "${bin_dir}:/out" \
     golang:1.25-bookworm \
-    bash -lc 'cd /src && /usr/local/go/bin/go build -trimpath -o "/out/xworkmate-go-core.${GOARCH}" .'
+    bash -lc 'cd /src && /usr/local/go/bin/go build -buildvcs=false -trimpath -o "/out/xworkmate-go-core.${GOARCH}" .'
 }
 
 export_container_images() {
@@ -375,6 +382,7 @@ EOF
     "openclaw": "${OPENCLAW_VERSION}",
     "playwright": "${PLAYWRIGHT_VERSION}",
     "googleChrome": "${GOOGLE_CHROME_VERSION}",
+    "litellmDebian11": "${LITELLM_DEBIAN_11_VERSION}",
     "postgresImage": "${POSTGRES_IMAGE}"
   }
 }
