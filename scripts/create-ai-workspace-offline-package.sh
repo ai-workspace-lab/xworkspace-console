@@ -79,8 +79,9 @@ download_apt_packages() {
   local platform="linux/${ARCH}"
   local apt_dir="${WORKDIR}/packages/apt"
   local apt_lists="${WORKDIR}/metadata/apt"
+  local wheel_dir="${WORKDIR}/packages/pip"
 
-  mkdir -p "${apt_dir}" "${apt_lists}"
+  mkdir -p "${apt_dir}" "${apt_lists}" "${wheel_dir}"
 
   docker run --rm --platform "${platform}" \
     -e DISTRO_ID="${DISTRO_ID}" \
@@ -90,6 +91,8 @@ download_apt_packages() {
     -e GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION}" \
     -v "${apt_dir}:/offline-apt" \
     -v "${apt_lists}:/offline-meta" \
+    -v "${wheel_dir}:/offline-pip" \
+    -v "${WORKDIR}/repos/litellm:/litellm-src:ro" \
     "${image}" \
     bash -lc "$(cat <<'CONTAINER'
 set -euo pipefail
@@ -126,7 +129,7 @@ apt-get update -y
 required_packages=(
   ansible git curl ca-certificates gnupg jq rsync unzip wget xdg-utils
   caddy xfce4 python3 python3-pip python3-venv python3-dev python3-setuptools
-  build-essential pkg-config python-is-python3 pandoc nodejs yarn golang-go
+  build-essential pkg-config libpq-dev python-is-python3 pandoc nodejs yarn golang-go
   texlive-xetex texlive-latex-extra texlive-fonts-recommended
   texlive-lang-chinese latexmk fonts-noto-cjk
   fonts-noto-cjk-extra fonts-wqy-zenhei fonts-wqy-microhei
@@ -220,32 +223,23 @@ find /var/cache/apt/archives -name '*.deb' -exec cp -n {} /offline-apt/ \;
 cd /offline-apt
 dpkg-scanpackages --multiversion . /dev/null | gzip -9c > Packages.gz
 find . -maxdepth 1 -name '*.deb' -printf '%f\n' | sort > /offline-meta/deb-files.txt
+
+apt-get install -y --no-install-recommends \
+  build-essential git libpq-dev python3 python3-dev python3-pip python3-venv
+python3 -m venv /tmp/ai-workspace-wheel-builder
+/tmp/ai-workspace-wheel-builder/bin/pip install --upgrade pip setuptools wheel
+/tmp/ai-workspace-wheel-builder/bin/pip wheel \
+  --wheel-dir /offline-pip \
+  "/litellm-src[proxy]" \
+  prisma \
+  psycopg2-binary
 CONTAINER
 )"
 }
 
-download_npm_packages() {
-  local npm_dir="${WORKDIR}/packages/npm"
-  local npm_cache_dir="${WORKDIR}/packages/npm-cache"
-  mkdir -p "${npm_dir}" "${npm_cache_dir}"
-  npm pack --pack-destination "${npm_dir}" "opencode-ai"
-  npm pack --pack-destination "${npm_dir}" "@google/gemini-cli"
-  npm pack --pack-destination "${npm_dir}" "@openai/codex"
-  npm pack --pack-destination "${npm_dir}" "@anthropic-ai/claude-code"
-  npm pack --pack-destination "${npm_dir}" "openclaw@${OPENCLAW_VERSION}"
-  npm pack --pack-destination "${npm_dir}" "@openclaw/codex@${OPENCLAW_VERSION}"
-  npm pack --pack-destination "${npm_dir}" "playwright@${PLAYWRIGHT_VERSION}"
-  npm cache add --cache "${npm_cache_dir}" "opencode-ai"
-  npm cache add --cache "${npm_cache_dir}" "@google/gemini-cli"
-  npm cache add --cache "${npm_cache_dir}" "@openai/codex"
-  npm cache add --cache "${npm_cache_dir}" "@anthropic-ai/claude-code"
-  npm cache add --cache "${npm_cache_dir}" "openclaw@${OPENCLAW_VERSION}"
-  npm cache add --cache "${npm_cache_dir}" "@openclaw/codex@${OPENCLAW_VERSION}"
-  npm cache add --cache "${npm_cache_dir}" "playwright@${PLAYWRIGHT_VERSION}"
-}
-
 warm_npm_dependency_cache() {
   local npm_cache_dir="${WORKDIR}/packages/npm-cache"
+  mkdir -p "${npm_cache_dir}"
   docker run --rm --platform "linux/${ARCH}" \
     -e OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
     -e PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION}" \
@@ -304,14 +298,6 @@ download_playwright_browser() {
     echo "Bundled Playwright Chromium executable was not found for ${ARCH}" >&2
     exit 1
   fi
-}
-
-download_pip_wheels() {
-  local wheel_dir="${WORKDIR}/packages/pip"
-  mkdir -p "${wheel_dir}"
-  python3 -m pip download --dest "${wheel_dir}" \
-    "litellm[proxy] @ git+${LITELLM_REPO}@${LITELLM_REF}" \
-    prisma psycopg2-binary || true
 }
 
 download_binaries() {
@@ -414,10 +400,8 @@ main() {
   clone_repo "${LITELLM_REPO}" "${LITELLM_REF}" "${WORKDIR}/repos/litellm" > "${WORKDIR}/metadata/litellm.commit"
 
   download_apt_packages "${image}"
-  download_npm_packages
   warm_npm_dependency_cache
   download_playwright_browser
-  download_pip_wheels
   download_binaries
   build_xworkmate_bridge_binary
   export_container_images
