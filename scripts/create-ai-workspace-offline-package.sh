@@ -117,18 +117,45 @@ fi
 
 apt-get update -y || true
 
-packages=(
+required_packages=(
   ansible git curl ca-certificates gnupg jq rsync unzip wget
+)
+optional_packages=(
   caddy xfce4 python3 python3-pip python3-venv python3-dev python3-setuptools
   build-essential pkg-config python-is-python3 pandoc fonts-noto-cjk
   fonts-noto-cjk-extra fonts-wqy-zenhei fonts-wqy-microhei
   google-chrome-stable nodejs yarn
 )
+packages=()
+
+for package in "${required_packages[@]}"; do
+  if ! apt-cache show "${package}" >/dev/null 2>&1; then
+    echo "Required APT package is unavailable for this target: ${package}" >&2
+    exit 1
+  fi
+  packages+=("${package}")
+done
+
+for package in "${optional_packages[@]}"; do
+  if apt-cache show "${package}" >/dev/null 2>&1; then
+    packages+=("${package}")
+  else
+    echo "Skipping unavailable optional APT package: ${package}" >&2
+  fi
+done
 
 if apt-cache show docker-ce >/dev/null 2>&1; then
-  packages+=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
+  packages+=(docker-ce docker-ce-cli containerd.io)
+  for package in docker-buildx-plugin docker-compose-plugin; do
+    if apt-cache show "${package}" >/dev/null 2>&1; then
+      packages+=("${package}")
+    fi
+  done
 elif apt-cache show docker.io >/dev/null 2>&1; then
-  packages+=(docker.io docker-compose-plugin)
+  packages+=(docker.io)
+  if apt-cache show docker-compose-plugin >/dev/null 2>&1; then
+    packages+=(docker-compose-plugin)
+  fi
 fi
 
 if apt-cache show golang-go >/dev/null 2>&1; then
@@ -138,7 +165,7 @@ if apt-cache show texlive-xetex >/dev/null 2>&1; then
   packages+=(texlive-xetex texlive-latex-extra texlive-fonts-recommended texlive-lang-chinese latexmk)
 fi
 
-apt-get install --download-only -y --no-install-recommends "${packages[@]}" || true
+apt-get install --download-only -y --no-install-recommends "${packages[@]}"
 apt-get download "nodejs=${NODEJS_22_VERSION}-1nodesource1" || true
 apt-get download "nodejs=${NODEJS_24_VERSION}-1nodesource1" || true
 cp -n ./*.deb /offline-apt/ 2>/dev/null || true
@@ -215,6 +242,11 @@ export_container_images() {
 write_manifest() {
   local manifest="${WORKDIR}/metadata/manifest.json"
   mkdir -p "$(dirname "${manifest}")"
+  cat > "${WORKDIR}/metadata/target.env" <<EOF
+DISTRO_ID=${DISTRO_ID}
+DISTRO_VERSION=${DISTRO_VERSION}
+ARCH=${ARCH}
+EOF
   cat > "${manifest}" <<JSON
 {
   "name": "ai-workspace-all-in-one-offline",
@@ -272,6 +304,13 @@ main() {
   cat > "${WORKDIR}/README.md" <<'README'
 # AI Workspace All-in-One Offline Package
 
+The standard online bootstrap can use matching packages published from
+`https://github.com/ai-workspace-lab/xworkspace-console/releases` automatically:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
+```
+
 Extract this archive on the target host, then run:
 
 ```bash
@@ -284,8 +323,14 @@ container images when Docker is available, and runs the packaged
 directories for playbooks, console, core skills, and bridge code.
 
 Set the same environment variables supported by the online installer before
-running the script, for example `TOKEN`, `XWORKMATE_BRIDGE_DOMAIN`, or
-`AI_WORKSPACE_SECURITY_LEVEL`.
+running the script, for example:
+
+```bash
+sudo env \
+  XWORKMATE_BRIDGE_DOMAIN=acp-bridge.onwalk.net \
+  AI_WORKSPACE_SECURITY_LEVEL=strict \
+  ./scripts/ai-workspace-offline-install.sh
+```
 README
 
   tar -czf "${OUT}" -C "$(dirname "${WORKDIR}")" "$(basename "${WORKDIR}")"

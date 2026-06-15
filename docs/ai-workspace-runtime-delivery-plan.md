@@ -11,9 +11,10 @@
 
 ## TODO
 
-- [ ] 等待并核对 `xworkspace-console` 的离线包 GitHub Actions 发布链路，确认 `publish-release` 完整结束且 release 产物上传成功。
+- [x] 等待并核对 `xworkspace-console` 的离线包 GitHub Actions 发布链路，确认 `publish-release` 完整结束且 release 产物上传成功。
 - [ ] 继续核对 `root@acp-bridge.onwalk.net` 的远程部署进度，确认 `setup-ai-workspace-all-in-one.sh` 最终完成并输出统一摘要。
-- [ ] `setup-ai-workspace-all-in-one.sh` 在目标主机上优先使用离线安装包加速部署，减少在线拉取与安装耗时。
+- [x] `setup-ai-workspace-all-in-one.sh` 在目标主机上优先使用离线安装包加速部署，减少在线拉取与安装耗时。
+- [ ] 验证 `setup-ai-workspace-all-in-one.sh` 幂等性：同一主机连续执行两次均成功，复用凭据、离线包缓存与已导入镜像，并安全等待部署/APT 锁。
 - [ ] 完成最终验收核对：Bridge 对外可达、其余服务默认仅本地监听、`acp-codex` / `opencode` / `gemini` / `hermes` / `qmd` / `litellm` 状态正常。
 - [ ] 记录最终提交哈希与远端验证结果，回填到本计划的交付结果部分。
 
@@ -38,6 +39,7 @@
 - [ ] Bridge 对外使用 `acp-bridge.onwalk.net`，其余服务默认不公开。
 - [ ] 脚本结束输出统一部署摘要：访问入口、一次性凭据、各服务运行状态、可用 Agent CLI。
 - [ ] `xfce_desktop / NodeJS / Playwright` 版本均可在单一来源（role defaults）查到并被固定。
+- [ ] 同一主机连续执行两次安装均成功，第二次执行不生成新凭据、不重复下载同一 release 包，并等待而非破坏并发 APT/dpkg 操作。
 
 ---
 

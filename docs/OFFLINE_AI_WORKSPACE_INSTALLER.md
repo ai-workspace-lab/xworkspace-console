@@ -32,10 +32,48 @@ Ubuntu Pro/ESM.
 
 ## Runtime Usage
 
-Extract the target package on the host and run:
+The online bootstrap prefers the matching offline package from the
+`ai-workspace-lab/xworkspace-console` GitHub releases when it is available:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
+```
+
+Set `AI_WORKSPACE_OFFLINE_MODE=off` to force the legacy online-only path, or
+`AI_WORKSPACE_OFFLINE_MODE=force` to fail when no matching offline package can be
+prepared.
+
+The default package source is:
+
+```text
+https://github.com/ai-workspace-lab/xworkspace-console/releases/latest/download/ai-workspace-all-in-one-offline-<distro>-<version>-<arch>.tar.gz
+```
+
+The latest release tag follows the `offline-ai-workspace-*` pattern.
+
+For private mirrors or pinned releases, use:
+
+```bash
+AI_WORKSPACE_OFFLINE_PACKAGE_BASE_URL=https://mirror.example/offline-package/ai-workspace/offline-ai-workspace-<run_number> \
+  bash scripts/setup-ai-workspace-all-in-one.sh
+
+AI_WORKSPACE_OFFLINE_RELEASE_TAG=offline-ai-workspace-<run_number> \
+  bash scripts/setup-ai-workspace-all-in-one.sh
+```
+
+You can also extract the target package on the host and run:
 
 ```bash
 sudo ./scripts/ai-workspace-offline-install.sh
+```
+
+Pass deployment settings explicitly through `sudo env` when needed:
+
+```bash
+sudo env \
+  XWORKMATE_BRIDGE_DOMAIN=acp-bridge.onwalk.net \
+  AI_WORKSPACE_SECURITY_LEVEL=strict \
+  ./scripts/ai-workspace-offline-install.sh
 ```
 
 The script configures a local APT repository, installs bundled binaries, loads

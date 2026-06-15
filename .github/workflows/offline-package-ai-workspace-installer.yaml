@@ -2,6 +2,8 @@ name: Build Offline AI Workspace All-in-One Package
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'scripts/create-ai-workspace-offline-package.sh'
       - 'scripts/ai-workspace-offline-install.sh'
@@ -97,7 +99,7 @@ jobs:
           DISTRO_VERSION: ${{ matrix.version }}
           ARCH: ${{ matrix.arch }}
           PLAYBOOKS_REF: ${{ github.event.inputs.playbooks_ref || 'main' }}
-          CONSOLE_REF: ${{ github.event.inputs.console_ref || 'main' }}
+          CONSOLE_REF: ${{ github.event_name == 'push' && github.sha || github.event.inputs.console_ref || 'main' }}
           CORE_SKILLS_REF: ${{ github.event.inputs.core_skills_ref || 'main' }}
           PACKAGE_VERSION: ${{ github.run_number }}
         run: |
@@ -126,6 +128,35 @@ jobs:
             version: "24.04"
             arch: amd64
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify online bootstrap hands off to offline installer
+        run: |
+          set -euo pipefail
+          fixture="${RUNNER_TEMP}/offline-handoff"
+          mkdir -p "${fixture}/scripts" "${fixture}/metadata"
+          cat > "${fixture}/metadata/target.env" <<EOF
+          DISTRO_ID=${{ matrix.distro }}
+          DISTRO_VERSION=${{ matrix.version }}
+          ARCH=${{ matrix.arch }}
+          EOF
+          cat > "${fixture}/scripts/ai-workspace-offline-install.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          test "${AI_WORKSPACE_OFFLINE_ACTIVE:-}" = "true"
+          printf 'offline-handoff-ok\n'
+          EOF
+          chmod +x "${fixture}/scripts/ai-workspace-offline-install.sh"
+          output="$(
+            AI_WORKSPACE_OFFLINE_MODE=force \
+            AI_WORKSPACE_OFFLINE_PACKAGE="${fixture}" \
+            AI_WORKSPACE_OFFLINE_DISTRO_ID=${{ matrix.distro }} \
+            AI_WORKSPACE_OFFLINE_DISTRO_VERSION=${{ matrix.version }} \
+            AI_WORKSPACE_OFFLINE_ARCH=${{ matrix.arch }} \
+            bash scripts/setup-ai-workspace-all-in-one.sh
+          )"
+          grep -q 'offline-handoff-ok' <<<"${output}"
+
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
@@ -139,6 +170,7 @@ jobs:
           tar -tzf ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}.tar.gz > contents.txt
           grep -q 'scripts/ai-workspace-offline-install.sh' contents.txt
           grep -q 'metadata/manifest.json' contents.txt
+          grep -q 'metadata/target.env' contents.txt
           grep -q 'repos/playbooks' contents.txt
           grep -q 'repos/xworkspace-console' contents.txt
           grep -q 'packages/apt/Packages.gz' contents.txt

@@ -24,6 +24,16 @@ set -euo pipefail
 #   PLAYBOOK_DIR (optional local playbooks checkout; useful for macOS validation)
 #   XWORKSPACE_CONSOLE_DIR (optional local xworkspace-console checkout for macOS)
 #   QMD_SOURCE_REPO / LITELLM_SOURCE_REPO (optional local git sources for offline installs)
+#   AI_WORKSPACE_OFFLINE_MODE=auto (default) | force | off
+#   AI_WORKSPACE_OFFLINE_PACKAGE (local tarball/directory or URL)
+#   AI_WORKSPACE_OFFLINE_PACKAGE_URL (direct tarball URL)
+#   AI_WORKSPACE_OFFLINE_PACKAGE_BASE_URL (mirror directory containing target tarball)
+#   AI_WORKSPACE_OFFLINE_RELEASE_TAG=latest (GitHub release tag or latest)
+#   AI_WORKSPACE_OFFLINE_REPO=ai-workspace-lab/xworkspace-console
+#   AI_WORKSPACE_OFFLINE_AUTO_DOWNLOAD=true (download matching GitHub release package in auto mode)
+#   AI_WORKSPACE_OFFLINE_WORK_DIR=/tmp/ai-workspace-offline
+#   AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT=1800
+#   AI_WORKSPACE_APT_LOCK_TIMEOUT=900
 #   AI_WORKSPACE_DARWIN_MODE=local (default on macOS) | ansible
 # ==============================================================================
 
@@ -40,6 +50,12 @@ XWORKMATE_BRIDGE_BRANCH=${XWORKMATE_BRIDGE_BRANCH:-"release/v1.1.4"}
 XWORKMATE_BRIDGE_SOURCE_DIR=${XWORKMATE_BRIDGE_SOURCE_DIR:-"/tmp/xworkmate-bridge"}
 AUTH_TOKEN_FILE=${AI_WORKSPACE_AUTH_TOKEN_FILE:-"$HOME/.ai_workspace_auth_token"}
 VAULT_FILE=${AI_WORKSPACE_VAULT_PASSWORD_FILE:-"$HOME/.vault_password"}
+AI_WORKSPACE_OFFLINE_MODE=${AI_WORKSPACE_OFFLINE_MODE:-"auto"}
+AI_WORKSPACE_OFFLINE_REPO=${AI_WORKSPACE_OFFLINE_REPO:-"ai-workspace-lab/xworkspace-console"}
+AI_WORKSPACE_OFFLINE_RELEASE_TAG=${AI_WORKSPACE_OFFLINE_RELEASE_TAG:-"latest"}
+AI_WORKSPACE_OFFLINE_WORK_DIR=${AI_WORKSPACE_OFFLINE_WORK_DIR:-"/tmp/ai-workspace-offline"}
+AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT=${AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT:-"1800"}
+AI_WORKSPACE_APT_LOCK_TIMEOUT=${AI_WORKSPACE_APT_LOCK_TIMEOUT:-"900"}
 
 # Function: Output messages
 info() {
@@ -47,6 +63,9 @@ info() {
 }
 success() {
     echo -e "\033[1;32m[SUCCESS]\033[0m $*" >&2
+}
+warn() {
+    echo -e "\033[1;33m[WARN]\033[0m $*" >&2
 }
 error() {
     echo -e "\033[1;31m[ERROR]\033[0m $*" >&2
@@ -70,6 +89,77 @@ detect_os() {
         Linux) echo "linux" ;;
         *) echo "unknown" ;;
     esac
+}
+
+acquire_deployment_lock() {
+    if [ "${AI_WORKSPACE_DEPLOYMENT_LOCK_HELD:-false}" = "true" ]; then
+        return
+    fi
+    if ! command -v flock >/dev/null 2>&1; then
+        warn "flock is unavailable; continuing without the deployment serialization lock."
+        return
+    fi
+
+    local lock_file="${AI_WORKSPACE_DEPLOYMENT_LOCK_FILE:-/var/lock/ai-workspace-all-in-one.lock}"
+    if [ "$(id -u)" -ne 0 ]; then
+        lock_file="${AI_WORKSPACE_DEPLOYMENT_LOCK_FILE:-${TMPDIR:-/tmp}/ai-workspace-all-in-one-${UID}.lock}"
+    fi
+    mkdir -p "$(dirname "$lock_file")"
+    exec 9>"$lock_file"
+    info "Waiting for the AI Workspace deployment lock: $lock_file"
+    if ! flock -w "$AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT" 9; then
+        error "Timed out waiting for another AI Workspace deployment to finish."
+    fi
+    export AI_WORKSPACE_DEPLOYMENT_LOCK_HELD=true
+}
+
+wait_for_apt_locks() {
+    if [ ! -f /etc/debian_version ]; then
+        return
+    fi
+
+    local timeout="${AI_WORKSPACE_APT_LOCK_TIMEOUT:-900}"
+    local waited=0
+    local busy
+    while true; do
+        busy=false
+        if pgrep -x apt-get >/dev/null 2>&1 ||
+           pgrep -x apt >/dev/null 2>&1 ||
+           pgrep -x dpkg >/dev/null 2>&1 ||
+           pgrep -x unattended-upgrade >/dev/null 2>&1; then
+            busy=true
+        fi
+        local lock
+        for lock in \
+            /var/lib/dpkg/lock-frontend \
+            /var/lib/dpkg/lock \
+            /var/lib/apt/lists/lock \
+            /var/cache/apt/archives/lock; do
+            if [ "$busy" = "false" ] &&
+               command -v fuser >/dev/null 2>&1 &&
+               [ -e "$lock" ] &&
+               fuser "$lock" >/dev/null 2>&1; then
+                busy=true
+            fi
+            if [ "$busy" = "false" ] &&
+               command -v lslocks >/dev/null 2>&1 &&
+               lslocks -rn -o PATH 2>/dev/null | grep -Fxq "$lock"; then
+                busy=true
+            fi
+        done
+
+        if [ "$busy" = "false" ]; then
+            return
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+            error "Timed out after ${timeout}s waiting for APT/dpkg locks."
+        fi
+        if [ $((waited % 30)) -eq 0 ]; then
+            info "Another package manager is active; waiting for APT/dpkg locks (${waited}s/${timeout}s)..."
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
 }
 
 install_prerequisites() {
@@ -101,6 +191,369 @@ install_prerequisites() {
         error "Unsupported OS. Please install git and ansible manually."
     fi
     success "Dependencies installed."
+}
+
+offline_mode_is_force() {
+    case "$(printf '%s' "${AI_WORKSPACE_OFFLINE_MODE:-auto}" | tr '[:upper:]' '[:lower:]')" in
+        force|required|true|1|yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+offline_mode_is_off() {
+    case "$(printf '%s' "${AI_WORKSPACE_OFFLINE_MODE:-auto}" | tr '[:upper:]' '[:lower:]')" in
+        off|disabled|false|0|no) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+offline_fail_or_fallback() {
+    local message=$1
+    if offline_mode_is_force; then
+        error "$message"
+    fi
+    warn "$message Falling back to online bootstrap."
+    return 1
+}
+
+detect_offline_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        *) return 1 ;;
+    esac
+}
+
+detect_offline_target() {
+    if [ ! -f /etc/os-release ]; then
+        return 1
+    fi
+
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    local distro="${AI_WORKSPACE_OFFLINE_DISTRO_ID:-${ID:-}}"
+    local version="${AI_WORKSPACE_OFFLINE_DISTRO_VERSION:-${VERSION_ID:-}}"
+    local arch="${AI_WORKSPACE_OFFLINE_ARCH:-}"
+
+    if [ -z "$arch" ]; then
+        arch="$(detect_offline_arch)" || return 1
+    fi
+
+    case "${distro}:${version}" in
+        debian:11|debian:12|debian:13|ubuntu:22.04|ubuntu:24.04|ubuntu:26.04) ;;
+        *) return 1 ;;
+    esac
+
+    printf '%s %s %s\n' "$distro" "$version" "$arch"
+}
+
+offline_package_filename() {
+    local target=$1
+    # shellcheck disable=SC2086
+    set -- $target
+    printf 'ai-workspace-all-in-one-offline-%s-%s-%s.tar.gz\n' "$1" "$2" "$3"
+}
+
+offline_release_url() {
+    local filename=$1
+    local tag="${AI_WORKSPACE_OFFLINE_RELEASE_TAG:-latest}"
+    if [ "$tag" = "latest" ]; then
+        printf 'https://github.com/%s/releases/latest/download/%s\n' "$AI_WORKSPACE_OFFLINE_REPO" "$filename"
+    else
+        printf 'https://github.com/%s/releases/download/%s/%s\n' "$AI_WORKSPACE_OFFLINE_REPO" "$tag" "$filename"
+    fi
+}
+
+offline_package_source() {
+    local filename=$1
+    if [ -n "${AI_WORKSPACE_OFFLINE_PACKAGE:-}" ]; then
+        printf '%s\n' "$AI_WORKSPACE_OFFLINE_PACKAGE"
+        return
+    fi
+    if [ -n "${AI_WORKSPACE_OFFLINE_PACKAGE_URL:-}" ]; then
+        printf '%s\n' "$AI_WORKSPACE_OFFLINE_PACKAGE_URL"
+        return
+    fi
+    if [ -n "${AI_WORKSPACE_OFFLINE_PACKAGE_BASE_URL:-}" ]; then
+        printf '%s/%s\n' "${AI_WORKSPACE_OFFLINE_PACKAGE_BASE_URL%/}" "$filename"
+        return
+    fi
+    if [ "${AI_WORKSPACE_OFFLINE_AUTO_DOWNLOAD:-true}" = "true" ]; then
+        offline_release_url "$filename"
+    fi
+}
+
+resolve_offline_source_url() {
+    local source=$1
+    local location
+
+    case "$source" in
+        http://*|https://*)
+            location="$(
+                curl -sSI --connect-timeout 15 --max-time 30 "$source" 2>/dev/null |
+                    tr -d '\r' |
+                    awk 'tolower($1) == "location:" { print $2; exit }'
+            )"
+            if [ -n "$location" ]; then
+                printf '%s\n' "$location"
+            else
+                printf '%s\n' "$source"
+            fi
+            ;;
+        *) printf '%s\n' "$source" ;;
+    esac
+}
+
+source_cache_key() {
+    local source=$1
+    printf '%s' "$source" | sha256_stream | cut -c1-16
+}
+
+sha256_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+        return
+    fi
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+        return
+    fi
+    return 1
+}
+
+offline_root_from_dir() {
+    local dir=$1
+    if [ -f "$dir/scripts/ai-workspace-offline-install.sh" ]; then
+        cd "$dir"
+        pwd
+        return
+    fi
+    return 1
+}
+
+extract_offline_package() {
+    local package=$1
+    local extract_dir="$AI_WORKSPACE_OFFLINE_WORK_DIR/extracted"
+    local installer archive_checksum cached_checksum cached_root
+
+    validate_offline_archive "$package" || return 1
+    archive_checksum="$(sha256_file "$package")" || return 1
+    cached_checksum="$(cat "$extract_dir/.archive-sha256" 2>/dev/null || true)"
+    cached_root="$(cat "$extract_dir/.package-root" 2>/dev/null || true)"
+    if [ "$cached_checksum" = "$archive_checksum" ] &&
+       [ -n "$cached_root" ] &&
+       [ -f "$cached_root/scripts/ai-workspace-offline-install.sh" ]; then
+        info "Reusing extracted AI Workspace offline package: $cached_root"
+        printf '%s\n' "$cached_root"
+        return
+    fi
+
+    rm -rf "$extract_dir"
+    mkdir -p "$extract_dir"
+    tar -xzf "$package" -C "$extract_dir"
+    installer="$(find "$extract_dir" -mindepth 2 -maxdepth 3 -type f -path '*/scripts/ai-workspace-offline-install.sh' -print -quit)"
+    if [ -z "$installer" ]; then
+        return 1
+    fi
+    cached_root="$(cd "$(dirname "$installer")/.." && pwd)"
+    printf '%s\n' "$archive_checksum" > "$extract_dir/.archive-sha256"
+    printf '%s\n' "$cached_root" > "$extract_dir/.package-root"
+    printf '%s\n' "$cached_root"
+}
+
+sha256_file() {
+    local file=$1
+    sha256_stream < "$file"
+}
+
+validate_offline_archive() {
+    local package=$1
+    local contents="$AI_WORKSPACE_OFFLINE_WORK_DIR/archive-contents.txt"
+
+    [ -f "$package" ] || return 1
+    tar -tzf "$package" > "$contents" || return 1
+    if awk '
+        /^\/+/ { exit 1 }
+        /(^|\/)\.\.(\/|$)/ { exit 1 }
+    ' "$contents"; then
+        return 0
+    fi
+    warn "Offline package contains an unsafe archive path: $package"
+    return 1
+}
+
+prepare_offline_package_root() {
+    local source=$1
+    local filename=$2
+    local resolved_source cache_key package
+    resolved_source="$(resolve_offline_source_url "$source")"
+    cache_key="$(source_cache_key "$resolved_source")" || return 1
+    package="$AI_WORKSPACE_OFFLINE_WORK_DIR/${cache_key}-${filename}"
+    local partial="${package}.part"
+
+    mkdir -p "$AI_WORKSPACE_OFFLINE_WORK_DIR"
+
+    case "$source" in
+        http://*|https://*)
+            command -v curl >/dev/null 2>&1 || return 1
+            if validate_offline_archive "$package" 2>/dev/null; then
+                info "Reusing cached AI Workspace offline package: $package"
+            else
+                info "Downloading AI Workspace offline package: $resolved_source"
+                if ! curl -fL --retry 3 --retry-delay 5 --continue-at - -o "$partial" "$resolved_source"; then
+                    rm -f "$partial"
+                    curl -fL --retry 3 --retry-delay 5 -o "$partial" "$resolved_source" || return 1
+                fi
+                validate_offline_archive "$partial" || return 1
+                mv "$partial" "$package"
+            fi
+            extract_offline_package "$package"
+            ;;
+        *)
+            if offline_root_from_dir "$source" 2>/dev/null; then
+                return
+            fi
+            if [ ! -f "$source" ]; then
+                return 1
+            fi
+            extract_offline_package "$source"
+            ;;
+    esac
+}
+
+manifest_target_value() {
+    local manifest=$1
+    local key=$2
+    awk -v key="$key" '
+        /"target"[[:space:]]*:/ { in_target=1; next }
+        in_target && /^[[:space:]]*}/ { exit }
+        in_target && $0 ~ "\"" key "\"[[:space:]]*:" {
+            value=$0
+            sub(/^.*:[[:space:]]*"/, "", value)
+            sub(/".*$/, "", value)
+            print value
+            exit
+        }
+    ' "$manifest"
+}
+
+validate_offline_package_target() {
+    local root=$1
+    local target=$2
+    local expected_distro expected_version expected_arch
+    local package_distro package_version package_arch
+
+    # shellcheck disable=SC2086
+    set -- $target
+    expected_distro=$1
+    expected_version=$2
+    expected_arch=$3
+
+    if [ -f "$root/metadata/target.env" ]; then
+        package_distro="$(sed -n 's/^DISTRO_ID=//p' "$root/metadata/target.env" | head -n 1)"
+        package_version="$(sed -n 's/^DISTRO_VERSION=//p' "$root/metadata/target.env" | head -n 1)"
+        package_arch="$(sed -n 's/^ARCH=//p' "$root/metadata/target.env" | head -n 1)"
+    elif [ -f "$root/metadata/manifest.json" ]; then
+        package_distro="$(manifest_target_value "$root/metadata/manifest.json" distro)"
+        package_version="$(manifest_target_value "$root/metadata/manifest.json" version)"
+        package_arch="$(manifest_target_value "$root/metadata/manifest.json" arch)"
+    elif [ "${AI_WORKSPACE_OFFLINE_ALLOW_UNVERIFIED_TARGET:-false}" = "true" ]; then
+        warn "Offline package has no target metadata; proceeding by explicit override."
+        return
+    else
+        error "Offline package is missing metadata/target.env and metadata/manifest.json."
+    fi
+
+    if [ "$package_distro" != "$expected_distro" ] ||
+       [ "$package_version" != "$expected_version" ] ||
+       [ "$package_arch" != "$expected_arch" ]; then
+        error "Offline package target ${package_distro}:${package_version}:${package_arch} does not match host ${expected_distro}:${expected_version}:${expected_arch}."
+    fi
+}
+
+run_offline_installer() {
+    local root=$1
+    local target=$2
+    local installer="$root/scripts/ai-workspace-offline-install.sh"
+    local env_args=(
+        "AI_WORKSPACE_OFFLINE_ACTIVE=true"
+        "AI_WORKSPACE_DEPLOYMENT_LOCK_HELD=true"
+    )
+    local env_name
+
+    [ -f "$installer" ] || return 1
+    validate_offline_package_target "$root" "$target"
+    chmod +x "$installer"
+
+    for env_name in \
+        AI_WORKSPACE_SECURITY_LEVEL \
+        LITELLM_API_CADDY_STRICT_WHITELIST \
+        XWORKSPACE_CONSOLE_PUBLIC_ACCESS \
+        XWORKMATE_BRIDGE_PUBLIC_ACCESS \
+        XWORKMATE_BRIDGE_DOMAIN \
+        GATEWAY_OPENCLAW_PUBLIC_ACCESS \
+        VAULT_PUBLIC_ACCESS \
+        XWORKSPACE_CONSOLE_ENABLE_XRDP \
+        AI_WORKSPACE_RUNTIME_MODES \
+        POSTGRESQL_DEPLOY_MODE \
+        AI_WORKSPACE_AUTH_TOKEN \
+        XWORKSPACE_CONSOLE_AUTH_TOKEN \
+        XWORKMATE_BRIDGE_AUTH_TOKEN \
+        BRIDGE_AUTH_TOKEN \
+        INTERNAL_SERVICE_TOKEN \
+        DEPLOY_TOKEN \
+        ANSIBLE_VAULT_PASSWORD \
+        AI_WORKSPACE_AUTH_TOKEN_FILE \
+        AI_WORKSPACE_VAULT_PASSWORD_FILE \
+        AI_WORKSPACE_APT_LOCK_TIMEOUT; do
+        if [ -n "${!env_name+x}" ]; then
+            env_args+=("$env_name=${!env_name}")
+        fi
+    done
+
+    info "Using offline AI Workspace package at $root"
+    if [ "$(id -u)" -eq 0 ]; then
+        env "${env_args[@]}" bash "$installer"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo env "${env_args[@]}" bash "$installer"
+    else
+        return 1
+    fi
+}
+
+try_bootstrap_from_offline_package() {
+    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ]; then
+        return 1
+    fi
+    if offline_mode_is_off; then
+        info "Offline package bootstrap disabled by AI_WORKSPACE_OFFLINE_MODE=$AI_WORKSPACE_OFFLINE_MODE"
+        return 1
+    fi
+    if [ "$(detect_os)" != "linux" ]; then
+        return 1
+    fi
+
+    local target filename source root
+    target="$(detect_offline_target)" || {
+        offline_fail_or_fallback "No supported offline package target detected for this host."
+        return 1
+    }
+    filename="$(offline_package_filename "$target")"
+    source="$(offline_package_source "$filename")"
+    if [ -z "$source" ]; then
+        offline_fail_or_fallback "No offline package source is configured."
+        return 1
+    fi
+
+    root="$(prepare_offline_package_root "$source" "$filename")" || {
+        offline_fail_or_fallback "Unable to prepare offline package from $source."
+        return 1
+    }
+    if run_offline_installer "$root" "$target"; then
+        return 0
+    fi
+
+    error "Offline package installer failed after making deployment changes; online fallback was not started."
 }
 
 resolve_unified_auth_token() {
@@ -686,7 +1139,8 @@ deploy_launch_agent() {
     local stderr_log=$5
     local plist_dir="$HOME/Library/LaunchAgents"
     local plist="$plist_dir/$label.plist"
-    local domain="gui/$(id -u)"
+    local domain
+    domain="gui/$(id -u)"
 
     mkdir -p "$plist_dir" "$(dirname "$stdout_log")" "$(dirname "$stderr_log")"
     cat > "$plist" <<EOF
@@ -930,6 +1384,14 @@ if [ "$OS_NAME" = "darwin" ] && [ "${AI_WORKSPACE_DARWIN_MODE:-local}" = "local"
     exit 0
 fi
 
+if [ "$OS_NAME" = "linux" ]; then
+    acquire_deployment_lock
+    wait_for_apt_locks
+    if try_bootstrap_from_offline_package; then
+        exit 0
+    fi
+fi
+
 if ! command -v ansible-playbook >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
     install_prerequisites "$OS_NAME"
 fi
@@ -996,6 +1458,7 @@ append_var "VAULT_DEPLOY_MODE"                  "vault_deploy_mode"
 append_var "XWORKSPACE_CONSOLE_ENABLE_XRDP"     "xworkspace_console_enable_xrdp"
 append_var "AI_WORKSPACE_RUNTIME_MODES"         "ai_workspace_runtime_modes"
 append_var "POSTGRESQL_DEPLOY_MODE"             "postgresql_deploy_mode"
+append_var "AI_WORKSPACE_APT_LOCK_TIMEOUT"      "ai_workspace_apt_lock_timeout"
 append_var "QMD_SOURCE_REPO"                    "qmd_source_repo"
 append_var "QMD_VERSION"                        "qmd_version"
 append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
@@ -1048,6 +1511,7 @@ fi
 chmod 600 "$VAULT_FILE"
 
 # 6. Run Ansible Playbook locally
+wait_for_apt_locks
 info "Running Ansible Playbook locally..."
 ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-all-in-one.yml \
     --vault-password-file "$VAULT_FILE" \
