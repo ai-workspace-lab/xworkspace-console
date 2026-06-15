@@ -2,9 +2,23 @@
 
 XWorkspace Console is the local AI workspace control plane for AI Workspace Lab. It brings together a React dashboard, Go status API, systemd user services, and XFCE desktop templates into one tabbed surface for services, runtime, terminal access, and workspace navigation.
 
-## Homepage Preview
+## Preview
 
 ![XWorkspace Console homepage preview](./assets/readme/homepage.png)
+
+The console is organized around tabs so the workspace can switch between overview, services, and custom artifact views.
+
+### Workspace and Service Tabs
+
+- `Workspace` for the main overview
+- `OpenClaw` for gateway access
+- `LiteLLM` for model routing and provider administration
+- `Vault` for secrets and auth
+- `Terminal` for the embedded local shell
+
+### Image / Video
+
+Image and video workflows fit naturally as custom tabs inside the same console shell. This keeps artifact review, service switching, and runtime operations in one place instead of scattering them across separate apps.
 
 ## About
 
@@ -32,22 +46,6 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 ```text
 http://127.0.0.1:17000
 ```
-
-## Tab Pages
-
-The console is organized around tabs so the workspace can switch between overview, services, and custom artifact views.
-
-### Workspace and Service Tabs
-
-- `Workspace` for the main overview
-- `OpenClaw` for gateway access
-- `LiteLLM` for model routing and provider administration
-- `Vault` for secrets and auth
-- `Terminal` for the embedded local shell
-
-### Image / Video
-
-Image and video workflows fit naturally as custom tabs inside the same console shell. This keeps artifact review, service switching, and runtime operations in one place instead of scattering them across separate apps.
 
 ![XWorkspace Console dashboard preview](./dashboard-preview.png)
 
