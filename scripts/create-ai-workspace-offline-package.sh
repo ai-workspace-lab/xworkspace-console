@@ -12,13 +12,14 @@ CONSOLE_REPO="${CONSOLE_REPO:-https://github.com/ai-workspace-lab/xworkspace-con
 CONSOLE_REF="${CONSOLE_REF:-main}"
 CORE_SKILLS_REPO="${CORE_SKILLS_REPO:-https://github.com/ai-workspace-lab/xworkspace-core-skills.git}"
 CORE_SKILLS_REF="${CORE_SKILLS_REF:-main}"
-XWORKMATE_BRIDGE_REPO="${XWORKMATE_BRIDGE_REPO:-https://github.com/ai-workspace-lab/xworkmate-bridge.git}"
-XWORKMATE_BRIDGE_REF="${XWORKMATE_BRIDGE_REF:-release/v1.1.4}"
-QMD_REPO="${QMD_REPO:-https://github.com/ai-workspace-services/qmd.git}"
-QMD_REF="${QMD_REF:-main}"
-LITELLM_REPO="${LITELLM_REPO:-https://github.com/ai-workspace-services/litellm.git}"
-LITELLM_REF="${LITELLM_REF:-litellm_internal_staging}"
-LITELLM_DEBIAN_11_VERSION="${LITELLM_DEBIAN_11_VERSION:-1.74.9}"
+CONSOLE_RUNTIME_RELEASE_REPO="${CONSOLE_RUNTIME_RELEASE_REPO:-ai-workspace-lab/xworkspace-console}"
+CONSOLE_RUNTIME_RELEASE_TAG="${CONSOLE_RUNTIME_RELEASE_TAG:-latest-runtime}"
+BRIDGE_RUNTIME_RELEASE_REPO="${BRIDGE_RUNTIME_RELEASE_REPO:-ai-workspace-lab/xworkmate-bridge}"
+BRIDGE_RUNTIME_RELEASE_TAG="${BRIDGE_RUNTIME_RELEASE_TAG:-latest-runtime}"
+QMD_RUNTIME_RELEASE_REPO="${QMD_RUNTIME_RELEASE_REPO:-ai-workspace-services/qmd}"
+QMD_RUNTIME_RELEASE_TAG="${QMD_RUNTIME_RELEASE_TAG:-latest-runtime}"
+LITELLM_RUNTIME_RELEASE_REPO="${LITELLM_RUNTIME_RELEASE_REPO:-ai-workspace-services/litellm}"
+LITELLM_RUNTIME_RELEASE_TAG="${LITELLM_RUNTIME_RELEASE_TAG:-latest-runtime}"
 
 NODEJS_MAJOR_VERSIONS="${NODEJS_MAJOR_VERSIONS:-22 24}"
 NODEJS_22_VERSION="${NODEJS_22_VERSION:-22.22.3}"
@@ -29,8 +30,6 @@ POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17.7}"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.6.6}"
 PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION:-1.60.0}"
 GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION:-149.0.7827.114-1}"
-UV_VERSION="${UV_VERSION:-0.11.21}"
-PORTABLE_PYTHON_VERSION="${PORTABLE_PYTHON_VERSION:-3.13.14}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -77,15 +76,100 @@ clone_repo() {
   git -C "${dest}" rev-parse HEAD
 }
 
+github_api() {
+  local path=$1
+  local headers=(-H "Accept: application/vnd.github+json")
+  if [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]; then
+    headers+=(-H "Authorization: Bearer ${GH_TOKEN:-${GITHUB_TOKEN}}")
+  fi
+  curl -fsSL --retry 5 --retry-all-errors "${headers[@]}" "https://api.github.com${path}"
+}
+
+resolve_runtime_tag() {
+  local repo=$1
+  local requested=$2
+  local attempt tag=""
+  if [ "${requested}" != "latest-runtime" ]; then
+    printf '%s\n' "${requested}"
+    return
+  fi
+  for attempt in $(seq 1 40); do
+    tag="$(
+      github_api "/repos/${repo}/releases?per_page=100" |
+        jq -r '[.[] | select(.draft == false and (.tag_name | startswith("runtime-")))] | first | .tag_name // empty'
+    )"
+    if [ -n "${tag}" ]; then
+      printf '%s\n' "${tag}"
+      return
+    fi
+    echo "Waiting for the first runtime release from ${repo} (${attempt}/40)..." >&2
+    sleep 30
+  done
+}
+
+download_release_asset() {
+  local repo=$1 requested_tag=$2 asset=$3 destination=$4 metadata_name=$5
+  local tag release_json asset_url checksums_url expected actual
+  tag="$(resolve_runtime_tag "${repo}" "${requested_tag}")"
+  [ -n "${tag}" ] || { echo "No runtime release found for ${repo}" >&2; exit 1; }
+  release_json="$(github_api "/repos/${repo}/releases/tags/${tag}")"
+  asset_url="$(jq -r --arg name "${asset}" '.assets[] | select(.name == $name) | .browser_download_url' <<<"${release_json}")"
+  checksums_url="$(jq -r '.assets[] | select(.name == "SHA256SUMS") | .browser_download_url' <<<"${release_json}")"
+  [ -n "${asset_url}" ] && [ "${asset_url}" != "null" ] ||
+    { echo "Release asset ${asset} is missing from ${repo}@${tag}" >&2; exit 1; }
+  [ -n "${checksums_url}" ] && [ "${checksums_url}" != "null" ] ||
+    { echo "SHA256SUMS is missing from ${repo}@${tag}" >&2; exit 1; }
+
+  mkdir -p "$(dirname "${destination}")" "${WORKDIR}/metadata/components"
+  curl -fsSL --retry 5 --retry-all-errors "${asset_url}" -o "${destination}"
+  curl -fsSL --retry 5 --retry-all-errors "${checksums_url}" \
+    -o "${WORKDIR}/metadata/components/${metadata_name}.SHA256SUMS"
+  expected="$(awk -v file="${asset}" '$2 == file || $2 == "*" file { print $1; exit }' \
+    "${WORKDIR}/metadata/components/${metadata_name}.SHA256SUMS")"
+  actual="$(sha256sum "${destination}" | awk '{print $1}')"
+  [ -n "${expected}" ] && [ "${expected}" = "${actual}" ] ||
+    { echo "Checksum mismatch or missing checksum for ${repo}@${tag}/${asset}" >&2; exit 1; }
+  printf '%s\n' "${tag}" > "${WORKDIR}/metadata/components/${metadata_name}.tag"
+  printf '%s\n' "${actual}" > "${WORKDIR}/metadata/components/${metadata_name}.sha256"
+}
+
+download_component_releases() {
+  local component_dir="${WORKDIR}/packages/components"
+  local bridge_tmp="${WORKDIR}/.bridge-runtime"
+  local litellm_tmp="${WORKDIR}/.litellm-runtime"
+  local console_asset="xworkspace-console-runtime-linux-${ARCH}.tar.gz"
+  local bridge_asset="xworkmate-bridge-linux-${ARCH}.tar.gz"
+  local qmd_asset="qmd-runtime-linux-${ARCH}.tar.gz"
+  local litellm_asset="litellm-runtime-${DISTRO_ID}-${DISTRO_VERSION}-${ARCH}.tar.gz"
+
+  mkdir -p "${component_dir}" "${bridge_tmp}" "${litellm_tmp}" "${WORKDIR}/packages/bin"
+  download_release_asset "${CONSOLE_RUNTIME_RELEASE_REPO}" "${CONSOLE_RUNTIME_RELEASE_TAG}" \
+    "${console_asset}" "${component_dir}/xworkspace-console-runtime.tar.gz" xworkspace-console
+  download_release_asset "${BRIDGE_RUNTIME_RELEASE_REPO}" "${BRIDGE_RUNTIME_RELEASE_TAG}" \
+    "${bridge_asset}" "${bridge_tmp}/${bridge_asset}" xworkmate-bridge
+  download_release_asset "${QMD_RUNTIME_RELEASE_REPO}" "${QMD_RUNTIME_RELEASE_TAG}" \
+    "${qmd_asset}" "${component_dir}/qmd-runtime.tar.gz" qmd
+  download_release_asset "${LITELLM_RUNTIME_RELEASE_REPO}" "${LITELLM_RUNTIME_RELEASE_TAG}" \
+    "${litellm_asset}" "${litellm_tmp}/${litellm_asset}" litellm
+
+  tar -xzf "${bridge_tmp}/${bridge_asset}" -C "${bridge_tmp}"
+  install -m 0755 "${bridge_tmp}/xworkmate-bridge/bin/xworkmate-go-core" \
+    "${WORKDIR}/packages/bin/xworkmate-go-core.${ARCH}"
+  tar -xzf "${litellm_tmp}/${litellm_asset}" -C "${litellm_tmp}"
+  cp -a "${litellm_tmp}/litellm-runtime/packages/pip" "${WORKDIR}/packages/"
+  if [ -d "${litellm_tmp}/litellm-runtime/packages/python" ]; then
+    cp -a "${litellm_tmp}/litellm-runtime/packages/python" "${WORKDIR}/packages/"
+  fi
+  cp "${litellm_tmp}/litellm-runtime/metadata/runtime.env" \
+    "${WORKDIR}/metadata/litellm-runtime.env"
+}
+
 download_apt_packages() {
   local image=$1
   local platform="linux/${ARCH}"
   local apt_dir="${WORKDIR}/packages/apt"
   local apt_lists="${WORKDIR}/metadata/apt"
-  local wheel_dir="${WORKDIR}/packages/pip"
-  local python_dir="${WORKDIR}/packages/python"
-
-  mkdir -p "${apt_dir}" "${apt_lists}" "${wheel_dir}" "${python_dir}"
+  mkdir -p "${apt_dir}" "${apt_lists}"
 
   docker run --rm --platform "${platform}" \
     -e DISTRO_ID="${DISTRO_ID}" \
@@ -94,14 +178,8 @@ download_apt_packages() {
     -e NODEJS_22_VERSION="${NODEJS_22_VERSION}" \
     -e NODEJS_24_VERSION="${NODEJS_24_VERSION}" \
     -e GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION}" \
-    -e LITELLM_DEBIAN_11_VERSION="${LITELLM_DEBIAN_11_VERSION}" \
-    -e UV_VERSION="${UV_VERSION}" \
-    -e PORTABLE_PYTHON_VERSION="${PORTABLE_PYTHON_VERSION}" \
     -v "${apt_dir}:/offline-apt" \
     -v "${apt_lists}:/offline-meta" \
-    -v "${wheel_dir}:/offline-pip" \
-    -v "${python_dir}:/offline-python" \
-    -v "${WORKDIR}/repos/litellm:/litellm-src:ro" \
     "${image}" \
     bash -lc "$(cat <<'CONTAINER'
 set -euo pipefail
@@ -253,40 +331,6 @@ cd /offline-apt
 dpkg-scanpackages --multiversion . /dev/null | gzip -9c > Packages.gz
 find . -maxdepth 1 -name '*.deb' -printf '%f\n' | sort > /offline-meta/deb-files.txt
 
-retry_command apt-get install -y --no-install-recommends \
-  build-essential git libpq-dev python3 python3-dev python3-pip python3-venv
-python_bin=python3
-if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "ubuntu:26.04" ]; then
-  case "$(dpkg --print-architecture)" in
-    amd64) uv_arch=x86_64 ;;
-    arm64) uv_arch=aarch64 ;;
-    *) echo "Unsupported uv architecture: $(dpkg --print-architecture)" >&2; exit 1 ;;
-  esac
-  curl -fsSL \
-    "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_arch}-unknown-linux-gnu.tar.gz" \
-    -o /tmp/uv.tar.gz
-  tar -xzf /tmp/uv.tar.gz -C /tmp
-  install -m 0755 "$(find /tmp -type f -path '*/uv-*/uv' -print -quit)" /usr/local/bin/uv
-  uv python install "${PORTABLE_PYTHON_VERSION}" --install-dir /offline-python --no-bin
-  python_bin="$(find -L /offline-python -type f -path '*/bin/python3.13' -perm /111 -print -quit)"
-  if [ -z "${python_bin}" ]; then
-    echo "Portable Python ${PORTABLE_PYTHON_VERSION} was not installed." >&2
-    exit 1
-  fi
-  find /offline-python -name EXTERNALLY-MANAGED -delete
-  "${python_bin}" -m ensurepip --upgrade
-fi
-"${python_bin}" -m venv /tmp/ai-workspace-wheel-builder
-/tmp/ai-workspace-wheel-builder/bin/pip install --upgrade pip setuptools wheel
-litellm_package_spec="/litellm-src[proxy]"
-if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "debian:11" ]; then
-  litellm_package_spec="litellm[proxy]==${LITELLM_DEBIAN_11_VERSION}"
-fi
-/tmp/ai-workspace-wheel-builder/bin/pip wheel \
-  --wheel-dir /offline-pip \
-  "${litellm_package_spec}" \
-  prisma \
-  psycopg2-binary
 CONTAINER
 )"
 }
@@ -298,27 +342,12 @@ warm_npm_dependency_cache() {
     -e OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
     -e PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION}" \
     -v "${npm_cache_dir}:/offline-cache" \
-    -v "${WORKDIR}/repos/xworkspace-console/dashboard:/sources/dashboard:ro" \
-    -v "${WORKDIR}/repos/qmd:/sources/qmd:ro" \
     node:24-bookworm \
     bash -lc "$(cat <<'CONTAINER'
 set -euo pipefail
 export npm_config_cache=/offline-cache
 export npm_config_audit=false
 export npm_config_fund=false
-
-mkdir -p /tmp/projects
-cp -a /sources/dashboard /tmp/projects/dashboard
-cp -a /sources/qmd /tmp/projects/qmd
-
-(
-  cd /tmp/projects/dashboard
-  npm ci --ignore-scripts --no-audit --no-fund
-)
-(
-  cd /tmp/projects/qmd
-  npm install --ignore-scripts --no-audit --no-fund --package-lock=false
-)
 
 npm install --ignore-scripts --no-audit --no-fund --prefix /tmp/global \
   opencode-ai \
@@ -379,19 +408,6 @@ download_binaries() {
   chmod +x "${bin_dir}/ttyd.${ttyd_arch}"
 }
 
-build_xworkmate_bridge_binary() {
-  local bin_dir="${WORKDIR}/packages/bin"
-  mkdir -p "${bin_dir}"
-  docker run --rm --platform "linux/${ARCH}" \
-    -e GOOS=linux \
-    -e GOARCH="${ARCH}" \
-    -e CGO_ENABLED=0 \
-    -v "${WORKDIR}/repos/xworkmate-bridge:/src:ro" \
-    -v "${bin_dir}:/out" \
-    golang:1.25-bookworm \
-    bash -lc 'cd /src && /usr/local/go/bin/go build -buildvcs=false -trimpath -o "/out/xworkmate-go-core.${GOARCH}" .'
-}
-
 export_container_images() {
   local images_dir="${WORKDIR}/packages/images"
   mkdir -p "${images_dir}"
@@ -419,19 +435,19 @@ EOF
   "sources": {
     "playbooks": {"repo": "${PLAYBOOKS_REPO}", "ref": "${PLAYBOOKS_REF}"},
     "xworkspaceConsole": {"repo": "${CONSOLE_REPO}", "ref": "${CONSOLE_REF}"},
-    "xworkspaceCoreSkills": {"repo": "${CORE_SKILLS_REPO}", "ref": "${CORE_SKILLS_REF}"},
-    "xworkmateBridge": {"repo": "${XWORKMATE_BRIDGE_REPO}", "ref": "${XWORKMATE_BRIDGE_REF}"},
-    "qmd": {"repo": "${QMD_REPO}", "ref": "${QMD_REF}"},
-    "litellm": {"repo": "${LITELLM_REPO}", "ref": "${LITELLM_REF}"}
+    "xworkspaceCoreSkills": {"repo": "${CORE_SKILLS_REPO}", "ref": "${CORE_SKILLS_REF}"}
+  },
+  "componentReleases": {
+    "xworkspaceConsole": {"repo": "${CONSOLE_RUNTIME_RELEASE_REPO}", "tag": "$(cat "${WORKDIR}/metadata/components/xworkspace-console.tag")"},
+    "xworkmateBridge": {"repo": "${BRIDGE_RUNTIME_RELEASE_REPO}", "tag": "$(cat "${WORKDIR}/metadata/components/xworkmate-bridge.tag")"},
+    "qmd": {"repo": "${QMD_RUNTIME_RELEASE_REPO}", "tag": "$(cat "${WORKDIR}/metadata/components/qmd.tag")"},
+    "litellm": {"repo": "${LITELLM_RUNTIME_RELEASE_REPO}", "tag": "$(cat "${WORKDIR}/metadata/components/litellm.tag")"}
   },
   "versions": {
     "vault": "${VAULT_VERSION}",
     "openclaw": "${OPENCLAW_VERSION}",
     "playwright": "${PLAYWRIGHT_VERSION}",
     "googleChrome": "${GOOGLE_CHROME_VERSION}",
-    "litellmDebian11": "${LITELLM_DEBIAN_11_VERSION}",
-    "uv": "${UV_VERSION}",
-    "portablePython": "${PORTABLE_PYTHON_VERSION}",
     "postgresImage": "${POSTGRES_IMAGE}"
   }
 }
@@ -451,15 +467,11 @@ main() {
   clone_repo "${PLAYBOOKS_REPO}" "${PLAYBOOKS_REF}" "${WORKDIR}/repos/playbooks" > "${WORKDIR}/metadata/playbooks.commit"
   clone_repo "${CONSOLE_REPO}" "${CONSOLE_REF}" "${WORKDIR}/repos/xworkspace-console" > "${WORKDIR}/metadata/xworkspace-console.commit"
   clone_repo "${CORE_SKILLS_REPO}" "${CORE_SKILLS_REF}" "${WORKDIR}/repos/xworkspace-core-skills" > "${WORKDIR}/metadata/xworkspace-core-skills.commit"
-  clone_repo "${XWORKMATE_BRIDGE_REPO}" "${XWORKMATE_BRIDGE_REF}" "${WORKDIR}/repos/xworkmate-bridge" > "${WORKDIR}/metadata/xworkmate-bridge.commit"
-  clone_repo "${QMD_REPO}" "${QMD_REF}" "${WORKDIR}/repos/qmd" > "${WORKDIR}/metadata/qmd.commit"
-  clone_repo "${LITELLM_REPO}" "${LITELLM_REF}" "${WORKDIR}/repos/litellm" > "${WORKDIR}/metadata/litellm.commit"
-
   download_apt_packages "${image}"
+  download_component_releases
   warm_npm_dependency_cache
   download_playwright_browser
   download_binaries
-  build_xworkmate_bridge_binary
   export_container_images
 
   cp "${SCRIPT_DIR}/ai-workspace-offline-install.sh" "${WORKDIR}/scripts/"

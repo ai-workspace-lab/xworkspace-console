@@ -454,13 +454,21 @@ ssh root@acp-bridge.onwalk.net \
 - 收口铁律：任一 Phase 2 产物在**被 Phase 3 消费前**必须 `finished`。
 - dpkg/全局 npm/全局 pip **绝不** `async`（§10.2）。
 
-### 10.5 Shell 层 fork 并发（≤5，预取层）
+### 10.5 Shell 层动态 fork 并发（≤ CPU 核心数 × 2，预取层）
 
-bootstrap 把可并行的外部 I/O 收敛到一个**有界 fork 池（上限 5）**，在 ansible 前（Phase 2 预取）与摘要阶段使用：
+bootstrap 把可并行的外部 I/O 收敛到一个**负载自适应的有界 fork 池**，在 ansible 前（Phase 2 预取）与摘要阶段使用。硬上限为目标主机在线 CPU 核心数的 2 倍；`AI_WORKSPACE_MAX_PARALLEL_JOBS` 可设更低人工上限，默认 `auto`。每次启动子任务前读取 1 分钟 load average，按 `min(人工上限, 2 × CPU - ceil(load1))` 动态收缩，最低保留 1 路：
 
 ```bash
-MAX_FORKS=5; pids=(); rc=0
-run_bounded(){ while [ "$(jobs -rp | wc -l)" -ge "$MAX_FORKS" ]; do wait -n; done; "$@" & pids+=($!); }
+CPU_COUNT="$(getconf _NPROCESSORS_ONLN)"
+HARD_LIMIT=$((CPU_COUNT * 2))
+LOAD_CEILING="$(awk -v load="$(cut -d' ' -f1 /proc/loadavg)" 'BEGIN { n=int(load); print load > n ? n + 1 : n }')"
+DYNAMIC_LIMIT=$((HARD_LIMIT - LOAD_CEILING))
+[ "$DYNAMIC_LIMIT" -ge 1 ] || DYNAMIC_LIMIT=1
+
+run_bounded() {
+  while [ "$(jobs -rp | wc -l)" -ge "$DYNAMIC_LIMIT" ]; do wait -n; done
+  "$@" &
+}
 
 # Phase 2 预取：5 仓库 pull + 二进制下载 + 镜像 pull（离线包存在则短路跳过）
 for r in playbooks console core-skills qmd litellm; do run_bounded fetch_repo "$r"; done
@@ -470,7 +478,7 @@ for p in "${pids[@]}"; do wait "$p" || rc=1; done
 [ "$rc" -eq 0 ] || { echo "[phase2] 存在失败子任务"; exit 1; }
 ```
 
-- 健康探测 fan-out（摘要前）：对 Portal/Bridge/OpenClaw/QMD/Hermes/PG/Vault/LiteLLM 的 `systemctl is-active`+`curl` 并发≤5，统一汇总。
+- 健康探测 fan-out（摘要前）：对 Portal/Bridge/OpenClaw/QMD/Hermes/PG/Vault/LiteLLM 的 `systemctl is-active`+`curl` 使用同一动态上限，统一按固定顺序汇总。
 - 每子进程带日志前缀（`[repo:qmd]`/`[bin:vault]`），失败非零退出、不静默。
 - 串行保留：`ansible-playbook` 主执行（Phase 1/Phase 3 由其内部保证）、一次性 token/摘要打印。
 

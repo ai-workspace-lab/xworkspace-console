@@ -1,0 +1,128 @@
+name: Build XWorkspace Console Runtime Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - api/**
+      - dashboard/**
+      - scripts/**
+      - .github/workflows/runtime-release.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: xworkspace-console-runtime-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build linux-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache: false
+
+      - name: Build target runtime
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          root="dist/runtime/xworkspace-console"
+          mkdir -p "${root}/dashboard" "${root}/bin" "dist/assets"
+
+          cp -a scripts "${root}/"
+          cp dashboard/package.json dashboard/package-lock.json dashboard/index.html \
+            dashboard/tsconfig.json dashboard/vite.config.ts "${root}/dashboard/"
+          cp -a dashboard/src "${root}/dashboard/"
+
+          docker run --rm --platform "linux/${TARGET_ARCH}" \
+            -v "${PWD}/dashboard:/src:ro" \
+            -v "${PWD}/${root}/dashboard:/out" \
+            node:24-bookworm \
+            bash -lc '
+              set -euo pipefail
+              cp -a /src/. /tmp/dashboard/
+              cd /tmp/dashboard
+              npm ci --no-audit --no-fund
+              npm run build
+              cp -a dist node_modules /out/
+            '
+
+          (
+            cd api
+            CGO_ENABLED=0 GOOS=linux GOARCH="${TARGET_ARCH}" \
+              go build -buildvcs=false -trimpath -o "../${root}/bin/xworkspace-api" .
+          )
+
+          cat > "${root}/manifest.json" <<JSON
+          {
+            "component": "xworkspace-console",
+            "commit": "${GITHUB_SHA}",
+            "os": "linux",
+            "arch": "${TARGET_ARCH}",
+            "apiBinary": "bin/xworkspace-api",
+            "dashboard": "dashboard"
+          }
+          JSON
+          tar -czf "dist/assets/xworkspace-console-runtime-linux-${TARGET_ARCH}.tar.gz" \
+            -C "dist/runtime" xworkspace-console
+          (
+            cd dist/assets
+            sha256sum -- ./*.tar.gz | sed 's# \./# #' > "SHA256SUMS-${TARGET_ARCH}"
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xworkspace-console-runtime-linux-${{ matrix.arch }}
+          path: |
+            dist/assets/*.tar.gz
+            dist/assets/SHA256SUMS-*
+          if-no-files-found: error
+
+  publish:
+    name: Publish runtime release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: xworkspace-console-runtime-linux-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="runtime-${GITHUB_SHA::12}"
+          cat dist/SHA256SUMS-* | sort -u > dist/SHA256SUMS
+          rm -f dist/SHA256SUMS-*
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" dist/*.tar.gz dist/SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${tag}" dist/*.tar.gz dist/SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "XWorkspace Console runtime ${GITHUB_SHA::12}" \
+              --notes "Prebuilt Linux runtime assets. No target-host build is required."
+          fi
+
+          gh workflow run offline-package-ai-workspace-installer.yaml \
+            --repo "${GITHUB_REPOSITORY}" \
+            -f "console_runtime_release_tag=${tag}"

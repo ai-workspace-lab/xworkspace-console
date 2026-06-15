@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APT_DIR="${ROOT}/packages/apt"
 BIN_DIR="${ROOT}/packages/bin"
+COMPONENT_DIR="${ROOT}/packages/components"
 IMAGE_DIR="${ROOT}/packages/images"
 NPM_CACHE_DIR="${ROOT}/packages/npm-cache"
 NPM_RUNTIME_CACHE_DIR="${AI_WORKSPACE_NPM_CACHE_DIR:-/var/cache/ai-workspace/npm}"
@@ -134,18 +135,12 @@ EOF
 }
 
 configure_local_git_sources() {
-  local repo git_dir
-  for repo in \
-    "${ROOT}/repos/xworkspace-console" \
-    "${ROOT}/repos/qmd" \
-    "${ROOT}/repos/litellm"; do
-    git_dir="${repo}/.git"
-    [ -d "${git_dir}" ] || continue
-    if ! git config --system --get-all safe.directory 2>/dev/null | grep -Fxq "${git_dir}"; then
-      git config --system --add safe.directory "${git_dir}"
-      SAFE_GIT_DIRS+=("${git_dir}")
-    fi
-  done
+  local git_dir="${ROOT}/repos/xworkspace-console/.git"
+  [ -d "${git_dir}" ] || return
+  if ! git config --system --get-all safe.directory 2>/dev/null | grep -Fxq "${git_dir}"; then
+    git config --system --add safe.directory "${git_dir}"
+    SAFE_GIT_DIRS+=("${git_dir}")
+  fi
 }
 
 append_available_package() {
@@ -369,11 +364,16 @@ configure_language_package_caches() {
     info "Configuring pip to prefer bundled wheelhouse"
     export PIP_FIND_LINKS="${PIP_WHEEL_DIR}"
     export PIP_PREFER_BINARY=true
+    export PIP_NO_INDEX=true
     if command -v python3 >/dev/null 2>&1 &&
        python3 -m pip --version >/dev/null 2>&1; then
       python3 -m pip config --global set global.find-links "${PIP_WHEEL_DIR}"
       python3 -m pip config --global set global.prefer-binary true
+      python3 -m pip config --global set global.no-index true
     fi
+  elif [ "${AI_WORKSPACE_PREBUILT_COMPONENTS_REQUIRED:-true}" = "true" ]; then
+    echo "Bundled LiteLLM wheelhouse is required but missing: ${PIP_WHEEL_DIR}" >&2
+    exit 1
   fi
 }
 
@@ -385,18 +385,22 @@ run_bootstrap() {
 
   export PLAYBOOK_DIR="${PLAYBOOK_DIR:-${ROOT}/repos/playbooks}"
   export XWORKSPACE_CONSOLE_DIR="${XWORKSPACE_CONSOLE_DIR:-${ROOT}/repos/xworkspace-console}"
-  export XWORKSPACE_CONSOLE_SOURCE_REPO="${XWORKSPACE_CONSOLE_SOURCE_REPO:-file://${ROOT}/repos/xworkspace-console}"
-  export XWORKSPACE_CONSOLE_SOURCE_VERSION="${XWORKSPACE_CONSOLE_SOURCE_VERSION:-$(cat "${ROOT}/metadata/xworkspace-console.commit")}"
   export XWORKSPACE_CORE_SKILLS_DIR="${XWORKSPACE_CORE_SKILLS_DIR:-${ROOT}/repos/xworkspace-core-skills}"
-  export XWORKMATE_BRIDGE_SOURCE_DIR="${XWORKMATE_BRIDGE_SOURCE_DIR:-${ROOT}/repos/xworkmate-bridge}"
-  export QMD_SOURCE_REPO="${QMD_SOURCE_REPO:-file://${ROOT}/repos/qmd}"
-  export LITELLM_SOURCE_REPO="${LITELLM_SOURCE_REPO:-file://${ROOT}/repos/litellm}"
+  export XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE="${XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE:-${COMPONENT_DIR}/xworkspace-console-runtime.tar.gz}"
+  export QMD_RUNTIME_ARCHIVE="${QMD_RUNTIME_ARCHIVE:-${COMPONENT_DIR}/qmd-runtime.tar.gz}"
+  if [ -f "${ROOT}/metadata/litellm-runtime.env" ]; then
+    # shellcheck disable=SC1091
+    source "${ROOT}/metadata/litellm-runtime.env"
+    export LITELLM_PACKAGE_SPEC
+  fi
   export XWORKSPACE_CONSOLE_PUBLIC_ACCESS="${XWORKSPACE_CONSOLE_PUBLIC_ACCESS:-false}"
   export XWORKMATE_BRIDGE_PUBLIC_ACCESS="${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}"
   export GATEWAY_OPENCLAW_PUBLIC_ACCESS="${GATEWAY_OPENCLAW_PUBLIC_ACCESS:-false}"
   export VAULT_PUBLIC_ACCESS="${VAULT_PUBLIC_ACCESS:-false}"
   export AI_WORKSPACE_OFFLINE_ACTIVE=true
+  export AI_WORKSPACE_PREBUILT_COMPONENTS_REQUIRED=true
   export AI_WORKSPACE_USE_PREBUILT_BRIDGE=true
+  export AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED=false
   export AI_WORKSPACE_DEPLOYMENT_LOCK_HELD=true
   export AI_WORKSPACE_APT_LOCK_TIMEOUT
 

@@ -1,14 +1,6 @@
 name: Build Offline AI Workspace All-in-One Package
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'scripts/create-ai-workspace-offline-package.sh'
-      - 'scripts/ai-workspace-offline-install.sh'
-      - 'scripts/setup-ai-workspace-all-in-one.sh'
-      - '.github/workflows/offline-package-ai-workspace-installer.yaml'
   workflow_dispatch:
     inputs:
       tag:
@@ -29,6 +21,26 @@ on:
         description: "ai-workspace-lab/xworkspace-core-skills git ref"
         required: false
         default: "main"
+        type: string
+      console_runtime_release_tag:
+        description: "Console runtime release tag, or latest-runtime"
+        required: false
+        default: "latest-runtime"
+        type: string
+      bridge_runtime_release_tag:
+        description: "Bridge runtime release tag, or latest-runtime"
+        required: false
+        default: "latest-runtime"
+        type: string
+      qmd_runtime_release_tag:
+        description: "QMD runtime release tag, or latest-runtime"
+        required: false
+        default: "latest-runtime"
+        type: string
+      litellm_runtime_release_tag:
+        description: "LiteLLM runtime release tag, or latest-runtime"
+        required: false
+        default: "latest-runtime"
         type: string
 
 permissions:
@@ -102,6 +114,11 @@ jobs:
           PLAYBOOKS_REF: ${{ github.event.inputs.playbooks_ref || 'main' }}
           CONSOLE_REF: ${{ github.event_name == 'push' && github.sha || github.event.inputs.console_ref || 'main' }}
           CORE_SKILLS_REF: ${{ github.event.inputs.core_skills_ref || 'main' }}
+          CONSOLE_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.console_runtime_release_tag || 'latest-runtime' }}
+          BRIDGE_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.bridge_runtime_release_tag || 'latest-runtime' }}
+          QMD_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.qmd_runtime_release_tag || 'latest-runtime' }}
+          LITELLM_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.litellm_runtime_release_tag || 'latest-runtime' }}
+          GH_TOKEN: ${{ github.token }}
           PACKAGE_VERSION: ${{ github.run_number }}
         run: |
           set -euo pipefail
@@ -180,6 +197,10 @@ jobs:
           grep -q 'metadata/target.env' contents.txt
           grep -q 'repos/playbooks' contents.txt
           grep -q 'repos/xworkspace-console' contents.txt
+          grep -q 'packages/components/xworkspace-console-runtime.tar.gz' contents.txt
+          grep -q 'packages/components/qmd-runtime.tar.gz' contents.txt
+          grep -q 'metadata/litellm-runtime.env' contents.txt
+          grep -q 'metadata/components/xworkmate-bridge.tag' contents.txt
           grep -q 'packages/apt/Packages.gz' contents.txt
           if [[ "${{ matrix.arch }}" == "arm64" ]]; then
             grep -Eq 'packages/playwright-browsers/.*/chrome-linux(64)?/chrome$' contents.txt

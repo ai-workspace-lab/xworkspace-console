@@ -26,7 +26,8 @@ set -euo pipefail
 #   XWORKSPACE_CONSOLE_DIR (optional local xworkspace-console checkout for macOS)
 #   XWORKSPACE_CONSOLE_SOURCE_REPO / XWORKSPACE_CONSOLE_SOURCE_VERSION
 #     (optional Git source used by the Linux console playbook)
-#   QMD_SOURCE_REPO / LITELLM_SOURCE_REPO (optional local git sources for offline installs)
+#   XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE / QMD_RUNTIME_ARCHIVE
+#   LITELLM_PACKAGE_SPEC / AI_WORKSPACE_PREBUILT_COMPONENTS_REQUIRED
 #   AI_WORKSPACE_OFFLINE_MODE=auto (default) | force | off
 #   AI_WORKSPACE_OFFLINE_PACKAGE (local tarball/directory or URL)
 #   AI_WORKSPACE_OFFLINE_PACKAGE_URL (direct tarball URL)
@@ -37,6 +38,11 @@ set -euo pipefail
 #   AI_WORKSPACE_OFFLINE_WORK_DIR=/tmp/ai-workspace-offline
 #   AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT=1800
 #   AI_WORKSPACE_APT_LOCK_TIMEOUT=900
+#   AI_WORKSPACE_PREFETCH_ENABLED=true
+#   AI_WORKSPACE_MAX_PARALLEL_JOBS=auto (never exceeds 2 x online CPU cores)
+#   AI_WORKSPACE_PREFETCH_DIR=/var/tmp/ai-workspace-prefetch
+#   AI_WORKSPACE_SPLIT_PHASES=true
+#   AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED=false
 #   AI_WORKSPACE_DARWIN_MODE=local (default on macOS) | ansible
 # ==============================================================================
 
@@ -70,6 +76,15 @@ if [ -z "${AI_WORKSPACE_OFFLINE_WORK_DIR:-}" ]; then
 fi
 AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT=${AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT:-"1800"}
 AI_WORKSPACE_APT_LOCK_TIMEOUT=${AI_WORKSPACE_APT_LOCK_TIMEOUT:-"900"}
+AI_WORKSPACE_PREFETCH_ENABLED=${AI_WORKSPACE_PREFETCH_ENABLED:-"true"}
+AI_WORKSPACE_MAX_PARALLEL_JOBS=${AI_WORKSPACE_MAX_PARALLEL_JOBS:-"auto"}
+AI_WORKSPACE_PREFETCH_DIR=${AI_WORKSPACE_PREFETCH_DIR:-"/var/tmp/ai-workspace-prefetch"}
+AI_WORKSPACE_SPLIT_PHASES=${AI_WORKSPACE_SPLIT_PHASES:-"true"}
+AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED=${AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED:-"false"}
+BOUNDED_JOB_PIDS=()
+BOUNDED_JOB_LABELS=()
+BOUNDED_JOB_FAILED=0
+PARALLEL_LIMIT_WARNING_EMITTED=false
 
 # Function: Output messages
 info() {
@@ -84,6 +99,120 @@ warn() {
 error() {
     echo -e "\033[1;31m[ERROR]\033[0m $*" >&2
     exit 1
+}
+
+reset_bounded_jobs() {
+    BOUNDED_JOB_PIDS=()
+    BOUNDED_JOB_LABELS=()
+    BOUNDED_JOB_FAILED=0
+}
+
+validate_parallel_job_limit() {
+    case "$AI_WORKSPACE_MAX_PARALLEL_JOBS" in
+        auto) ;;
+        ''|*[!0-9]*|0) error "AI_WORKSPACE_MAX_PARALLEL_JOBS must be auto or a positive integer." ;;
+    esac
+}
+
+online_cpu_count() {
+    local count=""
+    if command -v getconf >/dev/null 2>&1; then
+        count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+    fi
+    if [ -z "$count" ] && command -v nproc >/dev/null 2>&1; then
+        count="$(nproc 2>/dev/null || true)"
+    fi
+    if [ -z "$count" ] && command -v sysctl >/dev/null 2>&1; then
+        count="$(sysctl -n hw.logicalcpu 2>/dev/null || true)"
+    fi
+    case "$count" in
+        ''|*[!0-9]*|0) count=1 ;;
+    esac
+    printf '%s\n' "$count"
+}
+
+one_minute_load_average() {
+    if [ -r /proc/loadavg ]; then
+        awk '{print $1}' /proc/loadavg
+        return
+    fi
+    if command -v sysctl >/dev/null 2>&1; then
+        sysctl -n vm.loadavg 2>/dev/null | awk '{gsub(/[{}]/, ""); print $1}'
+        return
+    fi
+    printf '0\n'
+}
+
+dynamic_parallel_job_limit() {
+    local cpu_count hard_limit configured_limit load_average load_ceiling dynamic_limit
+    cpu_count="$(online_cpu_count)"
+    hard_limit=$((cpu_count * 2))
+    configured_limit="$hard_limit"
+    if [ "$AI_WORKSPACE_MAX_PARALLEL_JOBS" != "auto" ]; then
+        configured_limit="$AI_WORKSPACE_MAX_PARALLEL_JOBS"
+        if [ "$configured_limit" -gt "$hard_limit" ]; then
+            configured_limit="$hard_limit"
+            if [ "$PARALLEL_LIMIT_WARNING_EMITTED" = "false" ]; then
+                warn "Parallel job limit was capped at ${hard_limit} (2 x ${cpu_count} online CPU cores)."
+                PARALLEL_LIMIT_WARNING_EMITTED=true
+            fi
+        fi
+    fi
+
+    load_average="$(one_minute_load_average)"
+    load_ceiling="$(awk -v load="$load_average" 'BEGIN { value=int(load); if (load > value) value++; print value }')"
+    dynamic_limit=$((hard_limit - load_ceiling))
+    if [ "$dynamic_limit" -lt 1 ]; then
+        dynamic_limit=1
+    fi
+    if [ "$dynamic_limit" -gt "$configured_limit" ]; then
+        dynamic_limit="$configured_limit"
+    fi
+    printf '%s\n' "$dynamic_limit"
+}
+
+wait_for_bounded_job() {
+    local index=$1
+    local pid="${BOUNDED_JOB_PIDS[$index]}"
+    local label="${BOUNDED_JOB_LABELS[$index]}"
+
+    if wait "$pid"; then
+        info "Parallel job completed: $label"
+    else
+        warn "Parallel job failed: $label"
+        BOUNDED_JOB_FAILED=1
+    fi
+    unset 'BOUNDED_JOB_PIDS[index]'
+    unset 'BOUNDED_JOB_LABELS[index]'
+    BOUNDED_JOB_PIDS=("${BOUNDED_JOB_PIDS[@]}")
+    BOUNDED_JOB_LABELS=("${BOUNDED_JOB_LABELS[@]}")
+}
+
+run_bounded() {
+    local label=$1
+    local dynamic_limit
+    shift
+
+    validate_parallel_job_limit
+    dynamic_limit="$(dynamic_parallel_job_limit)"
+    while [ "${#BOUNDED_JOB_PIDS[@]}" -ge "$dynamic_limit" ]; do
+        wait_for_bounded_job 0
+        dynamic_limit="$(dynamic_parallel_job_limit)"
+    done
+
+    (
+        set -o pipefail
+        "$@" 2>&1 | sed "s/^/[${label}] /"
+    ) &
+    BOUNDED_JOB_PIDS+=("$!")
+    BOUNDED_JOB_LABELS+=("$label")
+}
+
+wait_for_bounded_jobs() {
+    while [ "${#BOUNDED_JOB_PIDS[@]}" -gt 0 ]; do
+        wait_for_bounded_job 0
+    done
+    [ "$BOUNDED_JOB_FAILED" -eq 0 ]
 }
 
 mask_secret() {
@@ -984,7 +1113,10 @@ PY
 }
 
 ensure_core_skills_source() {
-    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ] &&
+    if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
+       [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
+        info "Using prefetched xworkspace-core-skills directory at $XWORKSPACE_CORE_SKILLS_DIR"
+    elif [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ] &&
        [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
         info "Using packaged xworkspace-core-skills directory at $XWORKSPACE_CORE_SKILLS_DIR"
     elif [ -d "$XWORKSPACE_CORE_SKILLS_DIR/.git" ]; then
@@ -1003,7 +1135,10 @@ ensure_core_skills_source() {
 }
 
 ensure_xworkmate_bridge_source() {
-    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ] &&
+    if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
+       [ -f "$XWORKMATE_BRIDGE_SOURCE_DIR/go.mod" ]; then
+        info "Using prefetched xworkmate-bridge source at $XWORKMATE_BRIDGE_SOURCE_DIR"
+    elif [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ] &&
        [ -f "$XWORKMATE_BRIDGE_SOURCE_DIR/go.mod" ]; then
         info "Using packaged xworkmate-bridge source at $XWORKMATE_BRIDGE_SOURCE_DIR"
     elif [ -d "$XWORKMATE_BRIDGE_SOURCE_DIR/.git" ]; then
@@ -1020,6 +1155,234 @@ ensure_xworkmate_bridge_source() {
     fi
 
     [ -f "$XWORKMATE_BRIDGE_SOURCE_DIR/go.mod" ] || error "xworkmate-bridge source missing: $XWORKMATE_BRIDGE_SOURCE_DIR/go.mod"
+}
+
+read_playbook_default() {
+    local file=$1
+    local key=$2
+    sed -n "s/^${key}:[[:space:]]*[\"']\\{0,1\\}\\([^\"']*\\)[\"']\\{0,1\\}[[:space:]]*$/\\1/p" "$file" | head -n 1
+}
+
+prefetch_git_repository() {
+    local label=$1
+    local repo=$2
+    local ref=$3
+    local dest=$4
+
+    if [ -d "$dest/.git" ]; then
+        git -C "$dest" remote set-url origin "$repo"
+        git -C "$dest" fetch --force --prune origin "$ref"
+    else
+        rm -rf "$dest"
+        mkdir -p "$(dirname "$dest")"
+        git clone --no-checkout "$repo" "$dest"
+        git -C "$dest" fetch --force origin "$ref"
+    fi
+    git -C "$dest" checkout --force --detach FETCH_HEAD
+    git -C "$dest" clean -ffd
+    printf '%s\n' "$(git -C "$dest" rev-parse HEAD)" > "$dest/.ai-workspace-prefetched-commit"
+    info "Prefetched $label at $(cat "$dest/.ai-workspace-prefetched-commit")"
+}
+
+prefetch_postgres_image() {
+    local image=$1
+    docker pull "$image"
+}
+
+prefetch_independent_sources() {
+    if [ "$AI_WORKSPACE_PREFETCH_ENABLED" != "true" ]; then
+        info "Phase 2 prefetch disabled by AI_WORKSPACE_PREFETCH_ENABLED."
+        return
+    fi
+    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ]; then
+        info "Offline package is active; skipping online Phase 2 prefetch."
+        return
+    fi
+    if [ "$(detect_os)" != "linux" ]; then
+        return
+    fi
+    validate_parallel_job_limit
+
+    local console_dir="$AI_WORKSPACE_PREFETCH_DIR/xworkspace-console"
+    local qmd_dir="$AI_WORKSPACE_PREFETCH_DIR/qmd"
+    local litellm_dir="$AI_WORKSPACE_PREFETCH_DIR/litellm"
+    local qmd_repo qmd_ref litellm_repo litellm_ref postgres_image
+    qmd_repo="${QMD_SOURCE_REPO:-$(read_playbook_default roles/vhosts/qmd/defaults/main.yml qmd_source_repo)}"
+    qmd_ref="${QMD_VERSION:-$(read_playbook_default roles/vhosts/qmd/defaults/main.yml qmd_version)}"
+    litellm_repo="${LITELLM_SOURCE_REPO:-$(read_playbook_default roles/vhosts/litellm/defaults/main.yml litellm_source_repo)}"
+    litellm_ref="${LITELLM_VERSION:-$(read_playbook_default roles/vhosts/litellm/defaults/main.yml litellm_version)}"
+    postgres_image="${POSTGRESQL_IMAGE:-$(read_playbook_default roles/vhosts/postgres/defaults/main.yml postgresql_image)}"
+    [ -n "$qmd_repo" ] && [ -n "$qmd_ref" ] || error "Unable to resolve pinned QMD source."
+    [ -n "$litellm_repo" ] && [ -n "$litellm_ref" ] || error "Unable to resolve pinned LiteLLM source."
+
+    info "Starting load-adaptive Phase 2 source prefetch (current limit $(dynamic_parallel_job_limit), hard limit $(( $(online_cpu_count) * 2 )))..."
+    reset_bounded_jobs
+    run_bounded "repo:console" prefetch_git_repository \
+        "xworkspace-console" "$XWORKSPACE_CONSOLE_REPO_URL" "${XWORKSPACE_CONSOLE_SOURCE_VERSION:-main}" "$console_dir"
+    run_bounded "repo:core-skills" prefetch_git_repository \
+        "xworkspace-core-skills" "$XWORKSPACE_CORE_SKILLS_REPO_URL" "main" "$XWORKSPACE_CORE_SKILLS_DIR"
+    run_bounded "repo:bridge" prefetch_git_repository \
+        "xworkmate-bridge" "$XWORKMATE_BRIDGE_REPO_URL" "$XWORKMATE_BRIDGE_BRANCH" "$XWORKMATE_BRIDGE_SOURCE_DIR"
+    run_bounded "repo:qmd" prefetch_git_repository \
+        "qmd" "$qmd_repo" "$qmd_ref" "$qmd_dir"
+    run_bounded "repo:litellm" prefetch_git_repository \
+        "litellm" "$litellm_repo" "$litellm_ref" "$litellm_dir"
+
+    if command -v docker >/dev/null 2>&1 &&
+       printf ',%s,' "${AI_WORKSPACE_RUNTIME_MODES:-docker,systemd}" | grep -q ',docker,'; then
+        [ -n "$postgres_image" ] || error "Unable to resolve pinned PostgreSQL image."
+        run_bounded "image:postgres" prefetch_postgres_image "$postgres_image"
+    fi
+    if ! wait_for_bounded_jobs; then
+        warn "Phase 2 source prefetch failed; continuing with the standard Ansible source tasks."
+        return
+    fi
+
+    export XWORKSPACE_CONSOLE_SOURCE_REPO="file://$console_dir"
+    export XWORKSPACE_CONSOLE_SOURCE_VERSION
+    XWORKSPACE_CONSOLE_SOURCE_VERSION="$(cat "$console_dir/.ai-workspace-prefetched-commit")"
+    export QMD_SOURCE_REPO="file://$qmd_dir"
+    export QMD_VERSION="$qmd_ref"
+    export LITELLM_SOURCE_REPO="file://$litellm_dir"
+    export LITELLM_VERSION="$litellm_ref"
+    export AI_WORKSPACE_PREFETCH_COMPLETED=true
+    success "Phase 2 source prefetch completed."
+}
+
+ensure_runtime_build_user() {
+    local user=$1
+    local home=$2
+
+    if id "$user" >/dev/null 2>&1; then
+        return
+    fi
+    if [ "$(id -u)" -ne 0 ]; then
+        warn "Cannot create runtime build user $user without root privileges."
+        return 1
+    fi
+    getent group "$user" >/dev/null 2>&1 || groupadd "$user"
+    useradd --create-home --home-dir "$home" --gid "$user" --shell /bin/bash "$user"
+}
+
+run_as_runtime_user() {
+    local user=$1
+    local home=$2
+    shift 2
+
+    if [ "$(id -u)" -eq 0 ]; then
+        runuser -u "$user" -- env HOME="$home" "$@"
+    else
+        env HOME="$home" "$@"
+    fi
+}
+
+prepare_runtime_checkout() {
+    local user=$1
+    local home=$2
+    local repo=$3
+    local ref=$4
+    local dest=$5
+
+    if [ -d "$dest/.git" ]; then
+        run_as_runtime_user "$user" "$home" git -C "$dest" remote set-url origin "$repo"
+        run_as_runtime_user "$user" "$home" git -C "$dest" fetch --force --prune origin "$ref"
+    else
+        rm -rf "$dest"
+        install -d -o "$user" -g "$user" "$(dirname "$dest")"
+        run_as_runtime_user "$user" "$home" git clone --no-checkout "$repo" "$dest"
+        run_as_runtime_user "$user" "$home" git -C "$dest" fetch --force origin "$ref"
+    fi
+    run_as_runtime_user "$user" "$home" git -C "$dest" checkout --force --detach FETCH_HEAD
+    run_as_runtime_user "$user" "$home" git -C "$dest" clean -ffd
+}
+
+prebuild_console_dashboard() {
+    local user=$1
+    local home=$2
+    local repo=$3
+    local ref=$4
+    local dest=$5
+    local cache_dir=$6
+
+    prepare_runtime_checkout "$user" "$home" "$repo" "$ref" "$dest"
+    install -d -o "$user" -g "$user" "$cache_dir"
+    run_as_runtime_user "$user" "$home" env npm_config_cache="$cache_dir" \
+        npm install --no-audit --no-fund --prefix "$dest/dashboard"
+    run_as_runtime_user "$user" "$home" env npm_config_cache="$cache_dir" \
+        npm run build --prefix "$dest/dashboard"
+    run_as_runtime_user "$user" "$home" git -C "$dest" rev-parse HEAD \
+        > "$dest/dashboard/.ai-workspace-build-commit"
+}
+
+prebuild_qmd_runtime() {
+    local user=$1
+    local home=$2
+    local repo=$3
+    local ref=$4
+    local dest=$5
+    local cache_dir=$6
+
+    prepare_runtime_checkout "$user" "$home" "$repo" "$ref" "$dest"
+    install -d -o "$user" -g "$user" "$cache_dir" "$home/.bun/bin"
+    run_as_runtime_user "$user" "$home" env npm_config_cache="$cache_dir" \
+        npm install --no-audit --no-fund --prefix "$dest"
+    run_as_runtime_user "$user" "$home" env npm_config_cache="$cache_dir" \
+        npm run build --prefix "$dest"
+    run_as_runtime_user "$user" "$home" ln -sfn "$dest/bin/qmd" "$home/.bun/bin/qmd"
+}
+
+preinstall_openclaw_runtime() {
+    local user=$1
+    local home=$2
+    local version=$3
+    local cache_dir=$4
+
+    install -d -o "$user" -g "$user" "$cache_dir" "$home/.local"
+    run_as_runtime_user "$user" "$home" env npm_config_cache="$cache_dir" \
+        npm install --global --omit=dev --no-audit --no-fund \
+        --prefix "$home/.local" "openclaw@$version"
+}
+
+prebuild_independent_runtimes() {
+    if [ "$AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED" != "true" ]; then
+        info "Runtime prebuild disabled by AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED."
+        return
+    fi
+    if ! command -v npm >/dev/null 2>&1; then
+        warn "npm is unavailable after the Node.js phase; continuing without runtime prebuild."
+        return
+    fi
+
+    local user="${AI_WORKSPACE_RUNTIME_USER:-ubuntu}"
+    local home="${AI_WORKSPACE_RUNTIME_HOME:-/home/$user}"
+    local console_repo="${XWORKSPACE_CONSOLE_SOURCE_REPO:-$XWORKSPACE_CONSOLE_REPO_URL}"
+    local console_ref="${XWORKSPACE_CONSOLE_SOURCE_VERSION:-main}"
+    local qmd_repo qmd_ref openclaw_version
+    qmd_repo="${QMD_SOURCE_REPO:-$(read_playbook_default roles/vhosts/qmd/defaults/main.yml qmd_source_repo)}"
+    qmd_ref="${QMD_VERSION:-$(read_playbook_default roles/vhosts/qmd/defaults/main.yml qmd_version)}"
+    openclaw_version="$(read_playbook_default roles/vhosts/gateway_openclaw/defaults/main.yml gateway_openclaw_required_version)"
+
+    if ! ensure_runtime_build_user "$user" "$home"; then
+        return
+    fi
+
+    info "Starting load-adaptive runtime prebuild (current limit $(dynamic_parallel_job_limit))..."
+    reset_bounded_jobs
+    run_bounded "build:console" prebuild_console_dashboard \
+        "$user" "$home" "$console_repo" "$console_ref" "$home/xworkspace-console" \
+        "$AI_WORKSPACE_PREFETCH_DIR/npm-cache/console"
+    run_bounded "build:qmd" prebuild_qmd_runtime \
+        "$user" "$home" "$qmd_repo" "$qmd_ref" "$home/.local/src/qmd" \
+        "$AI_WORKSPACE_PREFETCH_DIR/npm-cache/qmd"
+    if [ -n "$openclaw_version" ]; then
+        run_bounded "package:openclaw" preinstall_openclaw_runtime \
+            "$user" "$home" "$openclaw_version" "$AI_WORKSPACE_PREFETCH_DIR/npm-cache/openclaw"
+    fi
+    if ! wait_for_bounded_jobs; then
+        warn "One or more runtime prebuild jobs failed; the standard Ansible tasks will retry them serially."
+        return
+    fi
+    success "Runtime prebuild completed."
 }
 
 wait_for_url() {
@@ -1059,8 +1422,10 @@ service_status_line() {
     local label=$1
     local unit_patterns=$2
     local port=${3:-}
+    local health_url=${4:-}
     local detail="not detected"
     local state="inactive"
+    local http_status=""
 
     if command -v systemctl >/dev/null 2>&1; then
         local unit
@@ -1088,7 +1453,79 @@ service_status_line() {
         fi
     fi
 
+    if [ -n "$health_url" ] && command -v curl >/dev/null 2>&1; then
+        http_status="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 "$health_url" 2>/dev/null || true)"
+        case "$http_status" in
+            2*|3*|401)
+                state="active"
+                detail="${detail};http:${http_status}"
+                ;;
+            '') detail="${detail};http:unreachable" ;;
+            *) detail="${detail};http:${http_status}" ;;
+        esac
+    fi
+
     printf '  %-28s : %-8s (%s)\n' "$label" "$state" "$detail"
+}
+
+write_service_status() {
+    local output_file=$1
+    shift
+    service_status_line "$@" > "$output_file"
+}
+
+print_parallel_service_statuses() {
+    local status_dir
+    local labels=(
+        "Portal / Console"
+        "XWorkMate Bridge"
+        "OpenClaw"
+        "QMD"
+        "Hermes"
+        "PostgreSQL"
+        "Vault"
+        "LiteLLM"
+        "Runtime desktop/browser"
+    )
+    local units=(
+        "xworkspace-console.service xworkspace-api.service"
+        "xworkmate-bridge.service xworkspace-bridge.service"
+        "xworkspace-openclaw.service openclaw-gateway.service openclaw.service"
+        "qmd-mcp.service xworkspace-qmd.service qmd.service qdrant.service"
+        "acp-hermes.service xworkspace-hermes.service hermes.service"
+        "postgresql.service postgresql@17-main.service postgresql@16-main.service postgresql@15-main.service xworkspace-postgres.service"
+        "xworkspace-vault.service vault.service"
+        "xworkspace-litellm.service litellm-proxy.service litellm.service"
+        "xworkspace-shell.service display-manager.service gdm.service lightdm.service"
+    )
+    local ports=("17000" "8787" "18789" "8181" "3920" "5432" "8200" "4000" "")
+    local urls=(
+        "http://127.0.0.1:17000/"
+        "http://127.0.0.1:8787/"
+        "http://127.0.0.1:18789/channels"
+        "http://127.0.0.1:8181/"
+        "http://127.0.0.1:3920/"
+        ""
+        "http://127.0.0.1:8200/v1/sys/health"
+        "http://127.0.0.1:4000/health"
+        ""
+    )
+    local index
+
+    status_dir="$(mktemp -d)"
+    reset_bounded_jobs
+    for index in "${!labels[@]}"; do
+        run_bounded "status:$index" write_service_status "$status_dir/$index" \
+            "${labels[$index]}" "${units[$index]}" "${ports[$index]}" "${urls[$index]}"
+    done
+    if ! wait_for_bounded_jobs; then
+        rm -rf "$status_dir"
+        error "Parallel service status collection failed."
+    fi
+    for index in "${!labels[@]}"; do
+        cat "$status_dir/$index"
+    done
+    rm -rf "$status_dir"
 }
 
 cli_status_line() {
@@ -1133,15 +1570,7 @@ print_deployment_summary() {
 
 [服务状态]
 EOF
-    service_status_line "Portal / Console" "xworkspace-console.service xworkspace-api.service" "17000"
-    service_status_line "XWorkMate Bridge" "xworkmate-bridge.service xworkspace-bridge.service" "8787"
-    service_status_line "OpenClaw" "xworkspace-openclaw.service openclaw-gateway.service openclaw.service" "18789"
-    service_status_line "QMD" "qmd-mcp.service xworkspace-qmd.service qmd.service qdrant.service" "8181"
-    service_status_line "Hermes" "acp-hermes.service xworkspace-hermes.service hermes.service" "3920"
-    service_status_line "PostgreSQL" "postgresql.service postgresql@17-main.service postgresql@16-main.service postgresql@15-main.service xworkspace-postgres.service" "5432"
-    service_status_line "Vault" "xworkspace-vault.service vault.service" "8200"
-    service_status_line "LiteLLM" "xworkspace-litellm.service litellm-proxy.service litellm.service" "4000"
-    service_status_line "Runtime desktop/browser" "xworkspace-shell.service display-manager.service gdm.service lightdm.service" ""
+    print_parallel_service_statuses
 
     cat <<'EOF'
 
@@ -1390,6 +1819,13 @@ deploy_macos_local() {
     info "Logs: $api_log, $api_err, $dashboard_log, and $dashboard_err"
 }
 
+if [ "${AI_WORKSPACE_LIBRARY_MODE:-false}" = "true" ]; then
+    if (return 0 2>/dev/null); then
+        return 0
+    fi
+    exit 0
+fi
+
 info "Starting AI Workspace All-in-One Bootstrap..."
 
 # 1. Install prerequisites (git, curl, ansible) if missing
@@ -1457,6 +1893,7 @@ else
 fi
 
 patch_playbook_user_systemd
+prefetch_independent_sources
 ensure_core_skills_source
 ensure_xworkmate_bridge_source
 
@@ -1499,8 +1936,10 @@ append_var "POSTGRESQL_DEPLOY_MODE"             "postgresql_deploy_mode"
 append_var "AI_WORKSPACE_APT_LOCK_TIMEOUT"      "ai_workspace_apt_lock_timeout"
 append_var "XWORKSPACE_CONSOLE_SOURCE_REPO"     "xworkspace_console_source_repo"
 append_var "XWORKSPACE_CONSOLE_SOURCE_VERSION"  "xworkspace_console_source_version"
+append_var "XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE" "xworkspace_console_runtime_archive"
 append_var "QMD_SOURCE_REPO"                    "qmd_source_repo"
 append_var "QMD_VERSION"                        "qmd_version"
+append_var "QMD_RUNTIME_ARCHIVE"                 "qmd_runtime_archive"
 append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
 append_var "LITELLM_VERSION"                    "litellm_version"
 
@@ -1552,11 +1991,30 @@ chmod 600 "$VAULT_FILE"
 
 # 6. Run Ansible Playbook locally
 wait_for_apt_locks
-info "Running Ansible Playbook locally..."
-ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-all-in-one.yml \
-    --vault-password-file "$VAULT_FILE" \
-    "${ANSIBLE_EXTRA_VARS[@]}"
-RET=$?
+RET=0
+if [ "$AI_WORKSPACE_SPLIT_PHASES" = "true" ]; then
+    info "Running AI Workspace preflight..."
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-preflight.yml \
+        --vault-password-file "$VAULT_FILE" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
+    if [ "$RET" -eq 0 ]; then
+        info "Running serialized Node.js foundation phase..."
+        ansible-playbook -i '127.0.0.1,' -c local setup-nodejs.yml \
+            --vault-password-file "$VAULT_FILE" \
+            "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
+    fi
+    if [ "$RET" -eq 0 ]; then
+        info "Running remaining AI Workspace runtime phases..."
+        ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-runtime.yml \
+            --vault-password-file "$VAULT_FILE" \
+            "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
+    fi
+else
+    info "Running monolithic AI Workspace Playbook..."
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-all-in-one.yml \
+        --vault-password-file "$VAULT_FILE" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
+fi
 
 if [ $RET -eq 0 ]; then
     success "AI Workspace deployed successfully!"
