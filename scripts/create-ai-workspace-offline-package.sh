@@ -144,18 +144,18 @@ download_component_releases() {
 
   mkdir -p "${component_dir}" "${bridge_tmp}" "${litellm_tmp}" "${WORKDIR}/packages/bin"
   download_release_asset "${CONSOLE_RUNTIME_RELEASE_REPO}" "${CONSOLE_RUNTIME_RELEASE_TAG}" \
-    "${console_asset}" "${component_dir}/xworkspace-console-runtime.tar.gz" xworkspace-console
+    "${console_asset}" "${component_dir}/${console_asset}" xworkspace-console
   download_release_asset "${BRIDGE_RUNTIME_RELEASE_REPO}" "${BRIDGE_RUNTIME_RELEASE_TAG}" \
-    "${bridge_asset}" "${bridge_tmp}/${bridge_asset}" xworkmate-bridge
+    "${bridge_asset}" "${component_dir}/${bridge_asset}" xworkmate-bridge
   download_release_asset "${QMD_RUNTIME_RELEASE_REPO}" "${QMD_RUNTIME_RELEASE_TAG}" \
-    "${qmd_asset}" "${component_dir}/qmd-runtime.tar.gz" qmd
+    "${qmd_asset}" "${component_dir}/${qmd_asset}" qmd
   download_release_asset "${LITELLM_RUNTIME_RELEASE_REPO}" "${LITELLM_RUNTIME_RELEASE_TAG}" \
-    "${litellm_asset}" "${litellm_tmp}/${litellm_asset}" litellm
+    "${litellm_asset}" "${component_dir}/${litellm_asset}" litellm
 
-  tar -xzf "${bridge_tmp}/${bridge_asset}" -C "${bridge_tmp}"
+  tar -xzf "${component_dir}/${bridge_asset}" -C "${bridge_tmp}"
   install -m 0755 "${bridge_tmp}/xworkmate-bridge/bin/xworkmate-go-core" \
     "${WORKDIR}/packages/bin/xworkmate-go-core.${ARCH}"
-  tar -xzf "${litellm_tmp}/${litellm_asset}" -C "${litellm_tmp}"
+  tar -xzf "${component_dir}/${litellm_asset}" -C "${litellm_tmp}"
   cp -a "${litellm_tmp}/litellm-runtime/packages/pip" "${WORKDIR}/packages/"
   if [ -d "${litellm_tmp}/litellm-runtime/packages/python" ]; then
     cp -a "${litellm_tmp}/litellm-runtime/packages/python" "${WORKDIR}/packages/"

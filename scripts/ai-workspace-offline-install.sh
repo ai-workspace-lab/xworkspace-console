@@ -2,9 +2,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "${ROOT}/metadata/target.env" ]; then
+  # shellcheck disable=SC1091
+  source "${ROOT}/metadata/target.env"
+fi
 APT_DIR="${ROOT}/packages/apt"
 BIN_DIR="${ROOT}/packages/bin"
 COMPONENT_DIR="${ROOT}/packages/components"
+TARGET_ARCH="${ARCH:-}"
+CONSOLE_RUNTIME_ASSET="${COMPONENT_DIR}/xworkspace-console-runtime-linux-${TARGET_ARCH}.tar.gz"
+BRIDGE_RUNTIME_ASSET="${COMPONENT_DIR}/xworkmate-bridge-linux-${TARGET_ARCH}.tar.gz"
+QMD_RUNTIME_ASSET="${COMPONENT_DIR}/qmd-runtime-linux-${TARGET_ARCH}.tar.gz"
+LITELLM_RUNTIME_ASSET="${COMPONENT_DIR}/litellm-runtime-${DISTRO_ID:-}-${DISTRO_VERSION:-}-${TARGET_ARCH}.tar.gz"
 IMAGE_DIR="${ROOT}/packages/images"
 NPM_CACHE_DIR="${ROOT}/packages/npm-cache"
 NPM_RUNTIME_CACHE_DIR="${AI_WORKSPACE_NPM_CACHE_DIR:-/var/cache/ai-workspace/npm}"
@@ -189,6 +198,15 @@ install_bundled_binaries() {
     unzip -o "${BIN_DIR}"/vault_*_linux_*.zip -d "${tmp}"
     install -m 0755 "${tmp}/vault" /usr/local/bin/vault
     rm -rf "${tmp}"
+  fi
+
+  if [ -f "${BRIDGE_RUNTIME_ASSET}" ]; then
+    local bridge_extract
+    bridge_extract="$(mktemp -d)"
+    tar -xzf "${BRIDGE_RUNTIME_ASSET}" -C "${bridge_extract}"
+    install -m 0755 "${bridge_extract}/xworkmate-bridge/bin/xworkmate-go-core" \
+      "${BIN_DIR}/xworkmate-go-core.${TARGET_ARCH}"
+    rm -rf "${bridge_extract}"
   fi
 
   case "$(uname -m)" in
@@ -386,8 +404,10 @@ run_bootstrap() {
   export PLAYBOOK_DIR="${PLAYBOOK_DIR:-${ROOT}/repos/playbooks}"
   export XWORKSPACE_CONSOLE_DIR="${XWORKSPACE_CONSOLE_DIR:-${ROOT}/repos/xworkspace-console}"
   export XWORKSPACE_CORE_SKILLS_DIR="${XWORKSPACE_CORE_SKILLS_DIR:-${ROOT}/repos/xworkspace-core-skills}"
-  export XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE="${XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE:-${COMPONENT_DIR}/xworkspace-console-runtime.tar.gz}"
-  export QMD_RUNTIME_ARCHIVE="${QMD_RUNTIME_ARCHIVE:-${COMPONENT_DIR}/qmd-runtime.tar.gz}"
+  export XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE="${XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE:-${CONSOLE_RUNTIME_ASSET}}"
+  export QMD_RUNTIME_ARCHIVE="${QMD_RUNTIME_ARCHIVE:-${QMD_RUNTIME_ASSET}}"
+  [ -f "${LITELLM_RUNTIME_ASSET}" ] ||
+    { echo "Exact LiteLLM runtime asset is missing: ${LITELLM_RUNTIME_ASSET}" >&2; exit 1; }
   if [ -f "${ROOT}/metadata/litellm-runtime.env" ]; then
     # shellcheck disable=SC1091
     source "${ROOT}/metadata/litellm-runtime.env"

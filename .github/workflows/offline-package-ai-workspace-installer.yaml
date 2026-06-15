@@ -197,8 +197,10 @@ jobs:
           grep -q 'metadata/target.env' contents.txt
           grep -q 'repos/playbooks' contents.txt
           grep -q 'repos/xworkspace-console' contents.txt
-          grep -q 'packages/components/xworkspace-console-runtime.tar.gz' contents.txt
-          grep -q 'packages/components/qmd-runtime.tar.gz' contents.txt
+          grep -q 'packages/components/xworkspace-console-runtime-linux-${{ matrix.arch }}.tar.gz' contents.txt
+          grep -q 'packages/components/xworkmate-bridge-linux-${{ matrix.arch }}.tar.gz' contents.txt
+          grep -q 'packages/components/qmd-runtime-linux-${{ matrix.arch }}.tar.gz' contents.txt
+          grep -q 'packages/components/litellm-runtime-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}.tar.gz' contents.txt
           grep -q 'metadata/litellm-runtime.env' contents.txt
           grep -q 'metadata/components/xworkmate-bridge.tag' contents.txt
           grep -q 'packages/apt/Packages.gz' contents.txt
