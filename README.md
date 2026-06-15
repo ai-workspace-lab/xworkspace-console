@@ -37,10 +37,6 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 http://127.0.0.1:17000
 ```
 
-![XWorkspace Console dashboard preview](./dashboard-preview.png)
-
-![XWorkspace Console status dropdown](./dashboard-status-dropdown.png)
-
 ## Download
 
 - Latest source: [GitHub repository](https://github.com/ai-workspace-lab/xworkspace-console)
