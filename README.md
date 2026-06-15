@@ -2,6 +2,10 @@
 
 XWorkspace Console is the local AI workspace control plane for AI Workspace Lab. It brings together a React dashboard, Go status API, systemd user services, and XFCE desktop templates into one tabbed surface for services, runtime, terminal access, and workspace navigation.
 
+## Homepage Preview
+
+![XWorkspace Console homepage preview](./assets/readme/homepage.png)
+
 ## About
 
 - Single entry point for the workspace UI at `http://127.0.0.1:17000`
