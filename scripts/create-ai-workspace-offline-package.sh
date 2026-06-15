@@ -245,7 +245,12 @@ required_packages=(
 resolve_required_package() {
   local candidate
   for candidate in "$@"; do
-    if apt-cache show "${candidate}" >/dev/null 2>&1; then
+    if apt-cache show "${candidate}" 2>/dev/null | awk '
+      BEGIN { found = 0 }
+      /^Package: / { package = $2 }
+      /^Version: / { found = 1 }
+      END { exit found ? 0 : 1 }
+    '; then
       printf '%s\n' "${candidate}"
       return
     fi
