@@ -11,6 +11,7 @@ STATE_DIR="${AI_WORKSPACE_OFFLINE_STATE_DIR:-/var/lib/ai-workspace/offline}"
 AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT="${AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT:-1800}"
 AI_WORKSPACE_APT_LOCK_TIMEOUT="${AI_WORKSPACE_APT_LOCK_TIMEOUT:-900}"
 APT_SOURCE_FILE="/etc/apt/sources.list.d/ai-workspace-offline.list"
+SAFE_GIT_DIRS=()
 APT_LOCAL_OPTIONS=(
   -o "Dir::Etc::sourcelist=sources.list.d/ai-workspace-offline.list"
   -o "Dir::Etc::sourceparts=-"
@@ -23,6 +24,14 @@ info() {
 
 warn() {
   printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2
+}
+
+cleanup() {
+  rm -f "${APT_SOURCE_FILE}"
+  local git_dir
+  for git_dir in "${SAFE_GIT_DIRS[@]}"; do
+    git config --system --unset-all safe.directory "${git_dir}" >/dev/null 2>&1 || true
+  done
 }
 
 require_root() {
@@ -108,8 +117,22 @@ configure_local_apt_repo() {
   cat > "${APT_SOURCE_FILE}" <<EOF
 deb [trusted=yes] file:${APT_DIR} ./
 EOF
-  trap 'rm -f "${APT_SOURCE_FILE}"' EXIT
   apt-get "${APT_LOCAL_OPTIONS[@]}" update
+}
+
+configure_local_git_sources() {
+  local repo git_dir
+  for repo in \
+    "${ROOT}/repos/xworkspace-console" \
+    "${ROOT}/repos/qmd" \
+    "${ROOT}/repos/litellm"; do
+    git_dir="${repo}/.git"
+    [ -d "${git_dir}" ] || continue
+    if ! git config --system --get-all safe.directory 2>/dev/null | grep -Fxq "${git_dir}"; then
+      git config --system --add safe.directory "${git_dir}"
+      SAFE_GIT_DIRS+=("${git_dir}")
+    fi
+  done
 }
 
 append_available_package() {
@@ -220,6 +243,8 @@ run_bootstrap() {
 
   export PLAYBOOK_DIR="${PLAYBOOK_DIR:-${ROOT}/repos/playbooks}"
   export XWORKSPACE_CONSOLE_DIR="${XWORKSPACE_CONSOLE_DIR:-${ROOT}/repos/xworkspace-console}"
+  export XWORKSPACE_CONSOLE_SOURCE_REPO="${XWORKSPACE_CONSOLE_SOURCE_REPO:-file://${ROOT}/repos/xworkspace-console}"
+  export XWORKSPACE_CONSOLE_SOURCE_VERSION="${XWORKSPACE_CONSOLE_SOURCE_VERSION:-$(cat "${ROOT}/metadata/xworkspace-console.commit")}"
   export XWORKSPACE_CORE_SKILLS_DIR="${XWORKSPACE_CORE_SKILLS_DIR:-${ROOT}/repos/xworkspace-core-skills}"
   export XWORKMATE_BRIDGE_SOURCE_DIR="${XWORKMATE_BRIDGE_SOURCE_DIR:-${ROOT}/repos/xworkmate-bridge}"
   export QMD_SOURCE_REPO="${QMD_SOURCE_REPO:-file://${ROOT}/repos/qmd}"
@@ -238,10 +263,12 @@ run_bootstrap() {
 
 main() {
   require_root
+  trap cleanup EXIT
   acquire_deployment_lock
   wait_for_apt_locks
   configure_local_apt_repo
   install_offline_prerequisites
+  configure_local_git_sources
   install_bundled_binaries
   load_container_images
   configure_language_package_caches

@@ -7,6 +7,7 @@ on:
     paths:
       - 'scripts/create-ai-workspace-offline-package.sh'
       - 'scripts/ai-workspace-offline-install.sh'
+      - 'scripts/setup-ai-workspace-all-in-one.sh'
       - '.github/workflows/offline-package-ai-workspace-installer.yaml'
   workflow_dispatch:
     inputs:

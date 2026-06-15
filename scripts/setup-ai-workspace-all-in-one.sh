@@ -23,6 +23,8 @@ set -euo pipefail
 #       Unified auth token passed to xworkmate-bridge, LiteLLM, OpenClaw, and Vault.
 #   PLAYBOOK_DIR (optional local playbooks checkout; useful for macOS validation)
 #   XWORKSPACE_CONSOLE_DIR (optional local xworkspace-console checkout for macOS)
+#   XWORKSPACE_CONSOLE_SOURCE_REPO / XWORKSPACE_CONSOLE_SOURCE_VERSION
+#     (optional Git source used by the Linux console playbook)
 #   QMD_SOURCE_REPO / LITELLM_SOURCE_REPO (optional local git sources for offline installs)
 #   AI_WORKSPACE_OFFLINE_MODE=auto (default) | force | off
 #   AI_WORKSPACE_OFFLINE_PACKAGE (local tarball/directory or URL)
@@ -505,6 +507,8 @@ run_offline_installer() {
         ANSIBLE_VAULT_PASSWORD \
         AI_WORKSPACE_AUTH_TOKEN_FILE \
         AI_WORKSPACE_VAULT_PASSWORD_FILE \
+        XWORKSPACE_CONSOLE_SOURCE_REPO \
+        XWORKSPACE_CONSOLE_SOURCE_VERSION \
         AI_WORKSPACE_APT_LOCK_TIMEOUT; do
         if [ -n "${!env_name+x}" ]; then
             env_args+=("$env_name=${!env_name}")
@@ -963,7 +967,10 @@ PY
 }
 
 ensure_core_skills_source() {
-    if [ -d "$XWORKSPACE_CORE_SKILLS_DIR/.git" ]; then
+    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ] &&
+       [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
+        info "Using packaged xworkspace-core-skills directory at $XWORKSPACE_CORE_SKILLS_DIR"
+    elif [ -d "$XWORKSPACE_CORE_SKILLS_DIR/.git" ]; then
         info "Updating xworkspace-core-skills checkout at $XWORKSPACE_CORE_SKILLS_DIR..."
         git -C "$XWORKSPACE_CORE_SKILLS_DIR" fetch origin
         git -C "$XWORKSPACE_CORE_SKILLS_DIR" reset --hard origin/main
@@ -979,7 +986,10 @@ ensure_core_skills_source() {
 }
 
 ensure_xworkmate_bridge_source() {
-    if [ -d "$XWORKMATE_BRIDGE_SOURCE_DIR/.git" ]; then
+    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ] &&
+       [ -f "$XWORKMATE_BRIDGE_SOURCE_DIR/go.mod" ]; then
+        info "Using packaged xworkmate-bridge source at $XWORKMATE_BRIDGE_SOURCE_DIR"
+    elif [ -d "$XWORKMATE_BRIDGE_SOURCE_DIR/.git" ]; then
         info "Updating xworkmate-bridge checkout at $XWORKMATE_BRIDGE_SOURCE_DIR..."
         git -C "$XWORKMATE_BRIDGE_SOURCE_DIR" fetch origin
         git -C "$XWORKMATE_BRIDGE_SOURCE_DIR" checkout "$XWORKMATE_BRIDGE_BRANCH"
@@ -1459,6 +1469,8 @@ append_var "XWORKSPACE_CONSOLE_ENABLE_XRDP"     "xworkspace_console_enable_xrdp"
 append_var "AI_WORKSPACE_RUNTIME_MODES"         "ai_workspace_runtime_modes"
 append_var "POSTGRESQL_DEPLOY_MODE"             "postgresql_deploy_mode"
 append_var "AI_WORKSPACE_APT_LOCK_TIMEOUT"      "ai_workspace_apt_lock_timeout"
+append_var "XWORKSPACE_CONSOLE_SOURCE_REPO"     "xworkspace_console_source_repo"
+append_var "XWORKSPACE_CONSOLE_SOURCE_VERSION"  "xworkspace_console_source_version"
 append_var "QMD_SOURCE_REPO"                    "qmd_source_repo"
 append_var "QMD_VERSION"                        "qmd_version"
 append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
