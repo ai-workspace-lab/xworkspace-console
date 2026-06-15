@@ -1436,6 +1436,15 @@ if [ -n "$PLAYBOOK_DIR" ]; then
     [ -d "$PLAYBOOK_DIR" ] || error "PLAYBOOK_DIR does not exist: $PLAYBOOK_DIR"
     info "Using local playbooks repository at $PLAYBOOK_DIR"
     cd "$PLAYBOOK_DIR"
+    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ]; then
+        info "Checking for latest playbook updates from GitHub..."
+        if curl -m 3 -sI https://github.com >/dev/null 2>&1; then
+            info "Network is reachable. Updating local offline playbooks repository..."
+            git fetch origin >/dev/null 2>&1 && git reset --hard origin/"$BRANCH" >/dev/null 2>&1 || true
+        else
+            info "Network is unreachable. Using cached offline playbooks."
+        fi
+    fi
 elif [ -d "$TARGET_DIR" ]; then
     info "Updating existing repository in $TARGET_DIR..."
     cd "$TARGET_DIR"
