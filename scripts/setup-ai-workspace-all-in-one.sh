@@ -97,6 +97,10 @@ mask_secret() {
     fi
 }
 
+if command -v git >/dev/null 2>&1; then
+    git config --global --add safe.directory '*' || true
+fi
+
 detect_os() {
     case "$(uname -s)" in
         Darwin) echo "darwin" ;;
