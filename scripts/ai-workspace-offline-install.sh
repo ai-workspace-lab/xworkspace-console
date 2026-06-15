@@ -10,6 +10,8 @@ NPM_RUNTIME_CACHE_DIR="${AI_WORKSPACE_NPM_CACHE_DIR:-/var/cache/ai-workspace/npm
 PIP_WHEEL_DIR="${ROOT}/packages/pip"
 PLAYWRIGHT_BROWSER_DIR="${ROOT}/packages/playwright-browsers"
 PLAYWRIGHT_BROWSER_INSTALL_DIR="${AI_WORKSPACE_PLAYWRIGHT_BROWSER_DIR:-/opt/ai-workspace/playwright-browsers}"
+PORTABLE_PYTHON_DIR="${ROOT}/packages/python"
+PORTABLE_PYTHON_INSTALL_DIR="${AI_WORKSPACE_PORTABLE_PYTHON_DIR:-/opt/ai-workspace/python}"
 STATE_DIR="${AI_WORKSPACE_OFFLINE_STATE_DIR:-/var/lib/ai-workspace/offline}"
 AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT="${AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT:-1800}"
 AI_WORKSPACE_APT_LOCK_TIMEOUT="${AI_WORKSPACE_APT_LOCK_TIMEOUT:-900}"
@@ -256,6 +258,46 @@ install_bundled_playwright_browser() {
   ln -sfn "${browser_binary}" /usr/local/bin/chromium
 }
 
+install_bundled_python_runtime() {
+  local packaged_python installed_python marker seed_checksum
+  packaged_python="$(
+    find -L "${PORTABLE_PYTHON_DIR}" -type f -path '*/bin/python3.13' -perm /111 -print -quit 2>/dev/null || true
+  )"
+  if [ -z "${packaged_python}" ]; then
+    return
+  fi
+
+  seed_checksum="$(sha256sum "${ROOT}/metadata/manifest.json" | awk '{print $1}')"
+  marker="${PORTABLE_PYTHON_INSTALL_DIR}/.ai-workspace-seed-sha256"
+  if [ "$(cat "${marker}" 2>/dev/null || true)" != "${seed_checksum}" ]; then
+    info "Installing bundled portable Python runtime"
+    rm -rf "${PORTABLE_PYTHON_INSTALL_DIR}"
+    mkdir -p "${PORTABLE_PYTHON_INSTALL_DIR}"
+    cp -a "${PORTABLE_PYTHON_DIR}/." "${PORTABLE_PYTHON_INSTALL_DIR}/"
+    printf '%s\n' "${seed_checksum}" > "${marker}"
+  else
+    info "Reusing bundled portable Python runtime"
+  fi
+
+  chown -R root:root "${PORTABLE_PYTHON_INSTALL_DIR}"
+  chmod -R a+rX "${PORTABLE_PYTHON_INSTALL_DIR}"
+  installed_python="$(
+    find -L "${PORTABLE_PYTHON_INSTALL_DIR}" -type f -path '*/bin/python3.13' -perm /111 -print -quit
+  )"
+  if [ -z "${installed_python}" ]; then
+    echo "Installed portable Python executable is missing." >&2
+    exit 1
+  fi
+  ln -sfn "${installed_python}" /usr/local/bin/ai-workspace-python
+  cat > /usr/local/bin/ai-workspace-pip <<'EOF'
+#!/usr/bin/env bash
+exec /usr/local/bin/ai-workspace-python -m pip "$@"
+EOF
+  chmod 0755 /usr/local/bin/ai-workspace-pip
+  export LITELLM_PYTHON_EXECUTABLE=/usr/local/bin/ai-workspace-python
+  export LITELLM_PIP_EXECUTABLE=/usr/local/bin/ai-workspace-pip
+}
+
 load_container_images() {
   if [ ! -d "${IMAGE_DIR}" ] || ! compgen -G "${IMAGE_DIR}/*.tar" >/dev/null; then
     return
@@ -372,6 +414,7 @@ main() {
   configure_local_git_sources
   install_bundled_binaries
   install_bundled_playwright_browser
+  install_bundled_python_runtime
   load_container_images
   configure_language_package_caches
   run_bootstrap

@@ -185,6 +185,9 @@ jobs:
             grep -Eq 'packages/playwright-browsers/.*/chrome-linux(64)?/chrome$' contents.txt
             grep -q 'metadata/apt/browser-deb-packages.txt' contents.txt
           fi
+          if [[ "${{ matrix.distro }}:${{ matrix.version }}" == "ubuntu:26.04" ]]; then
+            grep -Eq 'packages/python/.*/bin/python3.13$' contents.txt
+          fi
 
   publish-release:
     needs: test-offline-package

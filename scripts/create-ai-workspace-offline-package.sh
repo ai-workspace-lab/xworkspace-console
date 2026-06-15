@@ -29,6 +29,8 @@ POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:17.7}"
 OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.6.6}"
 PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION:-1.60.0}"
 GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION:-149.0.7827.114-1}"
+UV_VERSION="${UV_VERSION:-0.11.21}"
+PORTABLE_PYTHON_VERSION="${PORTABLE_PYTHON_VERSION:-3.13.14}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -81,8 +83,9 @@ download_apt_packages() {
   local apt_dir="${WORKDIR}/packages/apt"
   local apt_lists="${WORKDIR}/metadata/apt"
   local wheel_dir="${WORKDIR}/packages/pip"
+  local python_dir="${WORKDIR}/packages/python"
 
-  mkdir -p "${apt_dir}" "${apt_lists}" "${wheel_dir}"
+  mkdir -p "${apt_dir}" "${apt_lists}" "${wheel_dir}" "${python_dir}"
 
   docker run --rm --platform "${platform}" \
     -e DISTRO_ID="${DISTRO_ID}" \
@@ -92,9 +95,12 @@ download_apt_packages() {
     -e NODEJS_24_VERSION="${NODEJS_24_VERSION}" \
     -e GOOGLE_CHROME_VERSION="${GOOGLE_CHROME_VERSION}" \
     -e LITELLM_DEBIAN_11_VERSION="${LITELLM_DEBIAN_11_VERSION}" \
+    -e UV_VERSION="${UV_VERSION}" \
+    -e PORTABLE_PYTHON_VERSION="${PORTABLE_PYTHON_VERSION}" \
     -v "${apt_dir}:/offline-apt" \
     -v "${apt_lists}:/offline-meta" \
     -v "${wheel_dir}:/offline-pip" \
+    -v "${python_dir}:/offline-python" \
     -v "${WORKDIR}/repos/litellm:/litellm-src:ro" \
     "${image}" \
     bash -lc "$(cat <<'CONTAINER'
@@ -229,7 +235,27 @@ find . -maxdepth 1 -name '*.deb' -printf '%f\n' | sort > /offline-meta/deb-files
 
 apt-get install -y --no-install-recommends \
   build-essential git libpq-dev python3 python3-dev python3-pip python3-venv
-python3 -m venv /tmp/ai-workspace-wheel-builder
+python_bin=python3
+if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "ubuntu:26.04" ]; then
+  case "$(dpkg --print-architecture)" in
+    amd64) uv_arch=x86_64 ;;
+    arm64) uv_arch=aarch64 ;;
+    *) echo "Unsupported uv architecture: $(dpkg --print-architecture)" >&2; exit 1 ;;
+  esac
+  curl -fsSL \
+    "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_arch}-unknown-linux-gnu.tar.gz" \
+    -o /tmp/uv.tar.gz
+  tar -xzf /tmp/uv.tar.gz -C /tmp
+  install -m 0755 "$(find /tmp -type f -path '*/uv-*/uv' -print -quit)" /usr/local/bin/uv
+  uv python install "${PORTABLE_PYTHON_VERSION}" --install-dir /offline-python --no-bin
+  python_bin="$(find -L /offline-python -type f -path '*/bin/python3.13' -perm /111 -print -quit)"
+  if [ -z "${python_bin}" ]; then
+    echo "Portable Python ${PORTABLE_PYTHON_VERSION} was not installed." >&2
+    exit 1
+  fi
+  "${python_bin}" -m ensurepip --upgrade
+fi
+"${python_bin}" -m venv /tmp/ai-workspace-wheel-builder
 /tmp/ai-workspace-wheel-builder/bin/pip install --upgrade pip setuptools wheel
 litellm_package_spec="/litellm-src[proxy]"
 if [ "${DISTRO_ID}:${DISTRO_VERSION}" = "debian:11" ]; then
@@ -383,6 +409,8 @@ EOF
     "playwright": "${PLAYWRIGHT_VERSION}",
     "googleChrome": "${GOOGLE_CHROME_VERSION}",
     "litellmDebian11": "${LITELLM_DEBIAN_11_VERSION}",
+    "uv": "${UV_VERSION}",
+    "portablePython": "${PORTABLE_PYTHON_VERSION}",
     "postgresImage": "${POSTGRES_IMAGE}"
   }
 }
