@@ -1107,16 +1107,16 @@ print_deployment_summary() {
 
     cat <<EOF
 
-================ AI Workspace Deployment Summary ================
-[Access]
-  Workspace Portal (Console) : ${portal_url}
-  XWorkMate Bridge           : ${bridge_url}
+================ AI Workspace 部署摘要 ================
+[访问入口]
+  Workspace Portal (Console) : ${portal_url}      (本地)
+  XWorkMate Bridge           : ${bridge_url}   ← 唯一公开
 
-[One-time Credentials]
+[一次性凭据]（仅显示一次）
   AI_WORKSPACE_AUTH_TOKEN    : ${token}
   Vault root token           : ${vault_token_display}
 
-[Service Status]
+[服务状态]
 EOF
     service_status_line "Portal / Console" "xworkspace-console.service xworkspace-api.service" "17000"
     service_status_line "XWorkMate Bridge" "xworkmate-bridge.service xworkspace-bridge.service" "8787"
