@@ -374,6 +374,132 @@ ssh root@acp-bridge.onwalk.net \
 7. `setup-ai-workspace-all-in-one.sh` 统一摘要。
 8. 三仓库分别提交，记录 Commit Hash。
 9. 推送 + 远程部署 + 按 §7.2 验证。
+10. 并发优化落地（见 §10），最后做 §10.8 等价性回归。
+
+---
+
+## 10. 并发优化设计（深入分析 + 定制策略）
+
+> 目标：在**不丢 tasks、不破坏现有 role 结构、不牺牲稳定性**的前提下，提升单机部署速度。
+> 总策略：三相执行——**Phase 1 串行（系统全局/抢锁）→ Phase 2 并发（互不依赖 I/O）→ Phase 3 串行（确定性收口）**。不要把多个 role 直接改并发；只把“耗时、互不依赖、不写同一文件、不抢同一锁”的任务做 `async`，最后 `async_status` 收口。
+
+### 10.1 三相模型（权威定义）
+
+**Phase 1 — 必须串行**（抢锁 / 修改系统全局状态）：
+`apt update`、`apt install`、`dpkg` 相关、添加 apt repo / keyring、用户/用户组创建、基础目录创建、基础权限设置、Docker 安装、Caddy 安装、systemd 基础准备、防火墙基础规则、**全局 pip / 全局 npm(-g) 安装**。
+
+**Phase 2 — 可以并发**（互不依赖、不写同一文件、不操作同一锁）：
+`docker pull` 多镜像、下载多个二进制、`git clone` 多仓库、`go build`、**不同目录**的 `npm/pnpm install`、**不同目录**的前端 build、拉取插件、拉取静态资源、生成互不冲突的服务配置、初始化各服务独立工作目录、各服务独立 prepare 脚本。
+
+**Phase 3 — 必须串行**（收口确定性）：
+渲染最终配置、`systemd daemon-reload`、`enable service`、按依赖顺序 `start/restart`、health check、输出部署结果、清理临时文件。
+
+### 10.2 关键定制结论（针对本 Playbook 的深入分析）
+
+1. **所有 `npm -g` 共享同一 prefix → 必须 Phase 1 串行。**
+   `roles/vhosts/nodejs` 设 `npm_config_prefix=/usr/local/lib/npm`；Agent CLI（opencode-ai / @google/gemini-cli / @openai/codex / @anthropic-ai/claude-code）、`yarn`、`openclaw@ver` 全部 `npm -g` 到该 prefix。并发会争用同一 `node_modules`/`.staging` 与 npm cache 锁 → **不可并发**。
+2. **LiteLLM 是全局 `pip install` → Phase 1 串行**（非项目内 venv，写系统 site-packages）。修正早期草案中“pip 可 async”的判断。
+3. **真正安全的 Phase 2 候选是“外部 I/O 预取”**：git clone、二进制下载、docker pull、独立目录的前端 build。它们不碰 dpkg/npm-prefix/pip 全局锁，且写入各自独立路径。
+4. **跨 sub-playbook 的并发收益最大处在 Shell 预取层**：11 个步骤由 ansible 顺序导入，play 间难并发；把可并行的 I/O 上提到 bootstrap 的 Phase 2 fork 池（§10.5）预取，ansible 仅消费已就位产物，是收益/风险比最高的定制。
+5. **离线包优先**（呼应 TODO）：已有离线安装包/已导入镜像时，Phase 2 预取应短路跳过，直接复用缓存。
+
+### 10.3 现状任务 → 三相映射
+
+| 步骤 / role | Phase 1（串行） | Phase 2（可并发预取） | Phase 3（串行收口） |
+|---|---|---|---|
+| 1 nodejs | nodesource keyring/repo、`apt install nodejs`、`npm -g yarn` | — | — |
+| 2 console | apt(caddy/xfce4/python3/golang-go/chrome)+chrome repo/key、用户/目录/权限 | `get_url` ttyd 二进制、`git clone` console、dashboard `npm install && build`（独立目录） | 渲染 systemd unit/env/portal-services.json、`daemon-reload`/enable/restart、Caddy 写入+reload |
+| 3 ai_agent_runtime | `npm -g` Agent CLI、全局 pip(python deps)、apt(browser/docs/fonts)、Playwright(-g) | `agent_skills` 拉取 core-skills 市场（独立目录） | 校验/health、register 输出 |
+| 4 gateway_openclaw | `npm -g openclaw@ver`+插件 | （插件若独立目录拉取可并发） | 配置渲染、systemd、版本 assert、health |
+| 5 bridge + ACP | 同步 console；acp_server_* 的全局安装部分 | `xworkmate-go-core` 二进制下载/放置、acp 各自独立工作目录 prepare | 配置渲染、按依赖 `requires acp-*.service` 顺序启动、validation |
+| 6 vault | （systemd 基础准备） | `get_url` vault zip 下载、解压放置 | 配置渲染、systemd/init、health |
+| 7 postgres | Docker 安装、common 基础 | `docker pull` PG 镜像、初始化独立 data 目录 | compose 渲染、`compose up`、health |
+| 8 litellm | apt python3-pip、**全局 pip install litellm** | — | 配置渲染、systemd、health(`:4000/health`) |
+| 9 qmd | （bun 运行时安装，全局） | 条件并发：qmd 拉取/`bun install`（隔离于 `~/.bun`，不碰 dpkg） | qmd.env/index.yml 渲染、systemd --user、health(`:8181`) |
+| 11 xfce（可选） | apt 桌面包/xrdp/chrome、`npm -g`/Playwright | — | xrdp 服务 enable/start、会话配置 |
+
+> 说明：标“条件并发”的（如 qmd `bun`）仅当确认其只写入服务自身用户目录、且不与同时段其它全局安装争锁时才纳入 Phase 2，否则归 Phase 1。
+
+### 10.4 Ansible 层 async 模式（保留全部属性）
+
+在**单个 play 内**对 Phase 2 任务用 `poll:0` 发起、集中 `async_status` 收口。`register`/`when`/`notify`/`tags`/`become`/`failed_when` 一律保留：
+
+```yaml
+- name: Download ttyd binary (async)
+  ansible.builtin.get_url: { url: "...", dest: "{{ ttyd_path }}", mode: "0755" }
+  async: 1800
+  poll: 0
+  register: ttyd_job
+
+- name: Clone xworkspace-console (async)
+  ansible.builtin.git: { repo: "...", dest: "{{ repo_dir }}", version: main, depth: 1 }
+  become_user: "{{ xworkspace_console_user }}"
+  async: 1800
+  poll: 0
+  register: console_clone_job
+
+# …其它独立 Phase 2 任务一并 poll:0 发起…
+
+- name: Collect async Phase-2 jobs
+  ansible.builtin.async_status: { jid: "{{ item }}" }
+  register: p2
+  until: p2.finished
+  retries: 120
+  delay: 5
+  loop:
+    - "{{ ttyd_job.ansible_job_id }}"
+    - "{{ console_clone_job.ansible_job_id }}"
+```
+
+- 收口铁律：任一 Phase 2 产物在**被 Phase 3 消费前**必须 `finished`。
+- dpkg/全局 npm/全局 pip **绝不** `async`（§10.2）。
+
+### 10.5 Shell 层 fork 并发（≤5，预取层）
+
+bootstrap 把可并行的外部 I/O 收敛到一个**有界 fork 池（上限 5）**，在 ansible 前（Phase 2 预取）与摘要阶段使用：
+
+```bash
+MAX_FORKS=5; pids=(); rc=0
+run_bounded(){ while [ "$(jobs -rp | wc -l)" -ge "$MAX_FORKS" ]; do wait -n; done; "$@" & pids+=($!); }
+
+# Phase 2 预取：5 仓库 pull + 二进制下载 + 镜像 pull（离线包存在则短路跳过）
+for r in playbooks console core-skills qmd litellm; do run_bounded fetch_repo "$r"; done
+for b in ttyd vault xworkmate-go-core; do run_bounded fetch_binary "$b"; done
+for img in "${PG_IMAGES[@]}"; do run_bounded docker_pull "$img"; done
+for p in "${pids[@]}"; do wait "$p" || rc=1; done
+[ "$rc" -eq 0 ] || { echo "[phase2] 存在失败子任务"; exit 1; }
+```
+
+- 健康探测 fan-out（摘要前）：对 Portal/Bridge/OpenClaw/QMD/Hermes/PG/Vault/LiteLLM 的 `systemctl is-active`+`curl` 并发≤5，统一汇总。
+- 每子进程带日志前缀（`[repo:qmd]`/`[bin:vault]`），失败非零退出、不静默。
+- 串行保留：`ansible-playbook` 主执行（Phase 1/Phase 3 由其内部保证）、一次性 token/摘要打印。
+
+### 10.6 不允许丢失的内容（硬约束）
+
+逐一保留现有所有 tasks 及属性：`apt/package`、用户/目录/权限、env 文件、systemd unit 渲染、Caddy/Nginx、Docker/compose、服务启动、health check、`debug`、失败处理、`handlers`、`tags`、`become`、`when`、`notify`、`register`。**不得因并发删除/合并/跳过任何已有任务**；仅改变“何时等待”（`poll:0`+`async_status`），不改变“做什么”。
+
+### 10.7 安全的全局提速（与 async 互补，不改 task 语义）
+
+`ansible.cfg`（已存在）可叠加低风险项：
+
+```ini
+[defaults]
+gathering = smart
+fact_caching = jsonfile
+fact_caching_connection = /tmp/ansible_facts
+[ssh_connection]
+pipelining = true
+```
+
+并补足 TODO 关注点：APT/部署锁需**安全等待**（重试而非强删锁），保证二次幂等执行成功。`strategy: free` 单机收益有限、改变执行观感，**默认不启用**。
+
+### 10.8 验收（等价性回归）
+
+- [ ] 优化前后 `ansible-playbook --list-tasks` 任务集合一致（无丢失/合并）。
+- [ ] 每个 `async` 任务都有对应 `async_status` 收口，无悬挂 job。
+- [ ] Phase 1（apt/全局 npm/全局 pip/dpkg）与 Phase 3（daemon-reload/enable/start/health/摘要/清理）仍严格串行。
+- [ ] Phase 2 任务互不写同一文件、不抢同一锁；离线包存在时短路跳过。
+- [ ] 连续两次执行均成功、`changed=0` 幂等行为不变；Shell fork 池失败子任务非零退出且日志可见。
 
 ---
 
