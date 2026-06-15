@@ -56,7 +56,18 @@ VAULT_FILE=${AI_WORKSPACE_VAULT_PASSWORD_FILE:-"$HOME/.vault_password"}
 AI_WORKSPACE_OFFLINE_MODE=${AI_WORKSPACE_OFFLINE_MODE:-"auto"}
 AI_WORKSPACE_OFFLINE_REPO=${AI_WORKSPACE_OFFLINE_REPO:-"ai-workspace-lab/xworkspace-console"}
 AI_WORKSPACE_OFFLINE_RELEASE_TAG=${AI_WORKSPACE_OFFLINE_RELEASE_TAG:-"latest"}
-AI_WORKSPACE_OFFLINE_WORK_DIR=${AI_WORKSPACE_OFFLINE_WORK_DIR:-"/tmp/ai-workspace-offline"}
+if [ -z "${AI_WORKSPACE_OFFLINE_WORK_DIR:-}" ]; then
+    if command -v df >/dev/null 2>&1; then
+        _largest_mount=$(df -P -x tmpfs -x devtmpfs -x squashfs -x overlay 2>/dev/null | awk 'NR>1 {print $4, $6}' | sort -nr | head -n1 | awk '{print $2}')
+        if [ -n "$_largest_mount" ] && [ "$_largest_mount" != "/" ]; then
+            AI_WORKSPACE_OFFLINE_WORK_DIR="${_largest_mount}/ai-workspace-offline"
+        else
+            AI_WORKSPACE_OFFLINE_WORK_DIR="/var/tmp/ai-workspace-offline"
+        fi
+    else
+        AI_WORKSPACE_OFFLINE_WORK_DIR="/var/tmp/ai-workspace-offline"
+    fi
+fi
 AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT=${AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT:-"1800"}
 AI_WORKSPACE_APT_LOCK_TIMEOUT=${AI_WORKSPACE_APT_LOCK_TIMEOUT:-"900"}
 
