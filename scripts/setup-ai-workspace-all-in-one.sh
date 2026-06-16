@@ -64,7 +64,7 @@ AI_WORKSPACE_OFFLINE_REPO=${AI_WORKSPACE_OFFLINE_REPO:-"ai-workspace-lab/xworksp
 AI_WORKSPACE_OFFLINE_RELEASE_TAG=${AI_WORKSPACE_OFFLINE_RELEASE_TAG:-"latest"}
 if [ -z "${AI_WORKSPACE_OFFLINE_WORK_DIR:-}" ]; then
     if command -v df >/dev/null 2>&1; then
-        _largest_mount=$(df -P -x tmpfs -x devtmpfs -x squashfs -x overlay 2>/dev/null | awk 'NR>1 {print $4, $6}' | sort -nr | head -n1 | awk '{print $2}')
+        _largest_mount=$(df -P -x tmpfs -x devtmpfs -x squashfs -x overlay 2>/dev/null | awk 'NR>1 {print $4, $6}' | sort -nr | head -n1 | awk '{print $2}' || true)
         if [ -n "$_largest_mount" ] && [ "$_largest_mount" != "/" ]; then
             AI_WORKSPACE_OFFLINE_WORK_DIR="${_largest_mount}/ai-workspace-offline"
         else
@@ -855,6 +855,100 @@ macos_ttyd_bin() {
     error "ttyd is required for the local Portal terminal. Install ttyd or Homebrew."
 }
 
+macos_xworkmate_bridge_bin() {
+    local bridge_dir="$HOME/.local/src/xworkmate-bridge"
+    local bridge_bin="$bridge_dir/xworkmate-go-core"
+    if [ -x "$bridge_bin" ]; then
+        printf '%s\n' "$bridge_bin"
+        return
+    fi
+    info "Building XWorkmate Bridge locally under $bridge_dir..."
+    mkdir -p "$bridge_dir"
+    if [ ! -d "$bridge_dir/.git" ]; then
+        git clone https://github.com/ai-workspace-services/xworkmate-bridge.git "$bridge_dir"
+    fi
+    (cd "$bridge_dir" && go build -o "$bridge_bin" .)
+    printf '%s\n' "$bridge_bin"
+}
+
+macos_qmd_bin() {
+    local qmd_dir="$HOME/.local/src/qmd"
+    local qmd_bin="$qmd_dir/bin/qmd"
+    if [ -x "$qmd_bin" ]; then
+        printf '%s\n' "$qmd_bin"
+        return
+    fi
+    info "Building QMD locally under $qmd_dir..."
+    mkdir -p "$qmd_dir"
+    if [ ! -d "$qmd_dir/.git" ]; then
+        git clone https://github.com/ai-workspace-services/qmd.git "$qmd_dir"
+    fi
+    (cd "$qmd_dir" && npm install && npm run build)
+    printf '%s\n' "$qmd_bin"
+}
+
+macos_hermes_bin() {
+    local hermes_dir="$HOME/.local/share/xworkspace/bin"
+    local hermes_bin="$hermes_dir/hermes"
+    if [ -x "$hermes_bin" ]; then
+        printf '%s\n' "$hermes_bin"
+        return
+    fi
+    info "Creating Hermes Python shim at $hermes_bin..."
+    mkdir -p "$hermes_dir"
+    cat << 'EOF' > "$hermes_bin"
+#!/usr/bin/env python3
+import json
+import sys
+import uuid
+
+def respond(request, result=None, error=None):
+    payload = {"jsonrpc": "2.0", "id": request.get("id")}
+    if error is not None:
+        payload["error"] = {"code": -32000, "message": str(error)}
+    else:
+        payload["result"] = result if result is not None else {}
+    print(json.dumps(payload, separators=(",", ":")), flush=True)
+
+for line in sys.stdin:
+    try:
+        request = json.loads(line)
+    except Exception:
+        continue
+    method = request.get("method")
+    if method == "initialize":
+        respond(request, {
+            "protocolVersion": 1,
+            "authMethods": [],
+            "agentCapabilities": {
+                "loadSession": True,
+                "promptCapabilities": {"embeddedContext": True, "image": False},
+                "sessionCapabilities": {"resume": {}, "fork": {}, "list": {}},
+            },
+        })
+    elif method == "session/new":
+        respond(request, {"sessionId": "hermes-shim-" + uuid.uuid4().hex})
+    elif method in ("session/prompt", "session/start", "session/message"):
+        params = request.get("params") or {}
+        prompt = params.get("prompt") or params.get("taskPrompt") or ""
+        text = "pong" if "pong" in str(prompt).lower() else "Hermes ACP shim is online."
+        respond(request, {"output": text, "text": text})
+    else:
+        respond(request, {"ok": True})
+EOF
+    chmod +x "$hermes_bin"
+    printf '%s\n' "$hermes_bin"
+}
+
+install_macos_agent_clis() {
+    local prefix="$HOME/.local/share/xworkspace/node"
+    info "Installing local Agent CLIs (opencode-ai, gemini-cli, codex, claude) to $prefix..."
+    mkdir -p "$prefix"
+    npm install --prefix "$prefix" opencode-ai @google/gemini-cli @openai/codex @anthropic-ai/claude-code >/dev/null 2>&1 || {
+        warn "Failed to install NPM CLI tools. You may need to install them manually."
+    }
+}
+
 macos_postgres_tool() {
     local tool=$1
     if command -v "$tool" >/dev/null 2>&1; then
@@ -1534,9 +1628,8 @@ print_parallel_service_statuses() {
         "postgresql.service postgresql@17-main.service postgresql@16-main.service postgresql@15-main.service xworkspace-postgres.service"
         "xworkspace-vault.service vault.service"
         "xworkspace-litellm.service litellm-proxy.service litellm.service"
-        "xworkspace-shell.service display-manager.service gdm.service lightdm.service"
     )
-    local ports=("17000" "8787" "18789" "8181" "3920" "5432" "8200" "4000" "")
+    local ports=("17000" "8787" "18789" "8181" "3920" "5432" "8200" "4000")
     local urls=(
         "http://127.0.0.1:17000/"
         "http://127.0.0.1:8787/"
@@ -1546,8 +1639,15 @@ print_parallel_service_statuses() {
         ""
         "http://127.0.0.1:8200/v1/sys/health"
         "http://127.0.0.1:4000/health"
-        ""
     )
+
+    if command -v systemctl >/dev/null 2>&1; then
+        labels+=("Runtime desktop/browser")
+        units+=("xworkspace-shell.service display-manager.service gdm.service lightdm.service")
+        ports+=("")
+        urls+=("")
+    fi
+
     local index
 
     status_dir="$(mktemp -d)"
@@ -1575,6 +1675,9 @@ cli_status_line() {
     if command -v "$bin" >/dev/null 2>&1; then
         state="available"
         detail="$("$bin" --version 2>/dev/null | head -n 1 || command -v "$bin")"
+    elif [ -x "$HOME/.local/share/xworkspace/node/bin/$bin" ]; then
+        state="available"
+        detail="$HOME/.local/share/xworkspace/node/bin/$bin"
     fi
 
     printf '  %-28s : %-9s (%s)\n' "$label" "$state" "$detail"
@@ -1744,11 +1847,17 @@ start_macos_target_services() {
     openclaw_bin="$(macos_openclaw_bin)"
     vault_bin="$(macos_vault_bin)"
     ttyd_bin="$(macos_ttyd_bin)"
+    bridge_bin="$(macos_xworkmate_bridge_bin)"
+    qmd_bin="$(macos_qmd_bin)"
+    hermes_bin="$(macos_hermes_bin)"
 
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.litellm.plist" >/dev/null 2>&1 || true
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.openclaw.plist" >/dev/null 2>&1 || true
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.vault.plist" >/dev/null 2>&1 || true
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.ttyd.plist" >/dev/null 2>&1 || true
+    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.bridge.plist" >/dev/null 2>&1 || true
+    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.qmd.plist" >/dev/null 2>&1 || true
+    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.hermes.plist" >/dev/null 2>&1 || true
 
     info "Starting LiteLLM on http://127.0.0.1:4000 ..."
     deploy_launch_agent \
@@ -1785,10 +1894,38 @@ start_macos_target_services() {
         "$state_dir/ttyd.log" \
         "$state_dir/ttyd.err.log"
     wait_for_url "http://127.0.0.1:7681/"
+
+    info "Starting XWorkMate Bridge on http://127.0.0.1:8787/metrics ..."
+    deploy_launch_agent \
+        "plus.svc.xworkspace.bridge" \
+        "$HOME" \
+        "exec /usr/bin/env PATH='$tool_path' INTERNAL_SERVICE_TOKEN=\"\$(cat '$config_dir/auth-token')\" '$bridge_bin' serve --listen 127.0.0.1:8787" \
+        "$state_dir/bridge.log" \
+        "$state_dir/bridge.err.log"
+    wait_for_url "http://127.0.0.1:8787/metrics"
+
+    info "Starting QMD MCP on http://127.0.0.1:8181/mcp ..."
+    deploy_launch_agent \
+        "plus.svc.xworkspace.qmd" \
+        "$HOME" \
+        "exec /usr/bin/env PATH='$tool_path' QMD_EMBED_API_BASE_URL=https://integrate.api.nvidia.com/v1 QMD_EMBED_MODEL=nvidia/llama-nemotron-embed-1b-v2 '$qmd_bin' mcp --http --port 8181" \
+        "$state_dir/qmd.log" \
+        "$state_dir/qmd.err.log"
+    wait_for_url "http://127.0.0.1:8181/mcp"
+
+    info "Starting Hermes ACP Adapter on http://127.0.0.1:3920/acp ..."
+    deploy_launch_agent \
+        "plus.svc.xworkspace.hermes" \
+        "$HOME" \
+        "exec /usr/bin/env PATH='$tool_path' HERMES_ADAPTER_AUTH_TOKEN=\"\$(cat '$config_dir/auth-token')\" '$bridge_bin' adapter hermes --listen 127.0.0.1:3920 --hermes-bin '$hermes_bin'" \
+        "$state_dir/hermes.log" \
+        "$state_dir/hermes.err.log"
+    wait_for_url "http://127.0.0.1:3920/acp"
 }
 
 deploy_macos_local() {
     require_or_install_macos_cmds
+    install_macos_agent_clis
 
     local token=$1
     local console_dir config_dir state_dir api_log dashboard_log api_err dashboard_err go_bin npm_bin node_bin tool_path
@@ -1816,12 +1953,18 @@ deploy_macos_local() {
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.openclaw.plist" >/dev/null 2>&1 || true
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.vault.plist" >/dev/null 2>&1 || true
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.ttyd.plist" >/dev/null 2>&1 || true
+    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.bridge.plist" >/dev/null 2>&1 || true
+    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.qmd.plist" >/dev/null 2>&1 || true
+    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.hermes.plist" >/dev/null 2>&1 || true
     ensure_port_available_for_repo 8788 "$console_dir"
+    ensure_port_available_for_repo 8787 "$console_dir"
     ensure_port_available_for_repo 17000 "$console_dir"
     ensure_port_available_for_repo 4000 "$console_dir"
     ensure_port_available_for_repo 18789 "$console_dir"
     ensure_port_available_for_repo 8200 "$console_dir"
     ensure_port_available_for_repo 7681 "$console_dir"
+    ensure_port_available_for_repo 8181 "$console_dir"
+    ensure_port_available_for_repo 3920 "$console_dir"
 
     info "Building dashboard assets..."
     (cd "$console_dir/dashboard" && npm install && npm run build)
