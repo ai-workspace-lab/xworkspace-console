@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -136,6 +137,23 @@ func (a *AuthConfig) ResetAuthToken(currentToken string) (string, error) {
 		os.MkdirAll(filepath.Dir(path2), 0700)
 		os.WriteFile(path1, []byte(newToken), 0600)
 		os.WriteFile(path2, []byte(newToken), 0600)
+
+		openclawConfigPath := filepath.Join(home, ".openclaw", "openclaw.json")
+		if b, readErr := os.ReadFile(openclawConfigPath); readErr == nil {
+			var config map[string]any
+			if err := json.Unmarshal(b, &config); err == nil {
+				if models, ok := config["models"].(map[string]any); ok {
+					if providers, ok := models["providers"].(map[string]any); ok {
+						if litellm, ok := providers["litellm"].(map[string]any); ok {
+							litellm["apiKey"] = newToken
+							if updatedBytes, err := json.MarshalIndent(config, "", "  "); err == nil {
+								os.WriteFile(openclawConfigPath, updatedBytes, 0600)
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	a.tokens = append([]string{newToken}, a.tokens...)

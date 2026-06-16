@@ -58,6 +58,9 @@ XWORKMATE_BRIDGE_REPO_URL=${XWORKMATE_BRIDGE_REPO_URL:-"https://github.com/ai-wo
 XWORKMATE_BRIDGE_BRANCH=${XWORKMATE_BRIDGE_BRANCH:-"release/v1.1.4"}
 XWORKMATE_BRIDGE_SOURCE_DIR=${XWORKMATE_BRIDGE_SOURCE_DIR:-"/tmp/xworkmate-bridge"}
 AUTH_TOKEN_FILE=${AI_WORKSPACE_AUTH_TOKEN_FILE:-"$HOME/.ai_workspace_auth_token"}
+AI_WORKSPACE_LITELLM_PORT=${AI_WORKSPACE_LITELLM_PORT:-"4000"}
+AI_WORKSPACE_DEFAULT_MODEL=${AI_WORKSPACE_DEFAULT_MODEL:-"deepseek/deepseek-v4-flash"}
+AI_WORKSPACE_FALLBACK_MODEL=${AI_WORKSPACE_FALLBACK_MODEL:-"deepseek/deepseek-v4-pro"}
 VAULT_FILE=${AI_WORKSPACE_VAULT_PASSWORD_FILE:-"$HOME/.vault_password"}
 AI_WORKSPACE_OFFLINE_MODE=${AI_WORKSPACE_OFFLINE_MODE:-"auto"}
 AI_WORKSPACE_OFFLINE_REPO=${AI_WORKSPACE_OFFLINE_REPO:-"ai-workspace-lab/xworkspace-console"}
@@ -1135,13 +1138,13 @@ write_local_portal_config() {
     {
       "key": "litellm",
       "name": "LiteLLM Admin UI",
-      "url": "http://localhost:4000/ui",
+      "url": "http://localhost:${AI_WORKSPACE_LITELLM_PORT}/ui",
       "openMode": "iframe",
-      "healthUrl": "http://127.0.0.1:4000/ui",
+      "healthUrl": "http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/ui",
       "description": "Model routing and provider administration.",
       "icon": "chart",
       "match": ["litellm", "lite"],
-      "port": 4000,
+      "port": ${AI_WORKSPACE_LITELLM_PORT},
       "role": "model-router"
     },
     {
@@ -1666,7 +1669,7 @@ print_parallel_service_statuses() {
         "xworkspace-vault.service vault.service"
         "xworkspace-litellm.service litellm-proxy.service litellm.service"
     )
-    local ports=("17000" "8787" "18789" "8181" "3920" "5432" "8200" "4000")
+    local ports=("17000" "8787" "18789" "8181" "3920" "5432" "8200" "${AI_WORKSPACE_LITELLM_PORT}")
     local urls=(
         "http://127.0.0.1:17000/"
         "http://127.0.0.1:8787/"
@@ -1675,7 +1678,7 @@ print_parallel_service_statuses() {
         "http://127.0.0.1:3920/"
         ""
         "http://127.0.0.1:8200/v1/sys/health"
-        "http://127.0.0.1:4000/health"
+        "http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/health"
     )
 
     if command -v systemctl >/dev/null 2>&1; then
@@ -1753,7 +1756,7 @@ print_deployment_summary() {
 [访问入口]
   Workspace Portal (Console) : ${portal_url}      (本地)
   XWorkMate Bridge           : ${bridge_url}   ← ${bridge_label}
-  LiteLLM API Endpoint       : http://127.0.0.1:4000      (本地)
+  LiteLLM API Endpoint       : http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}      (本地)
 
 ${cred_label}
   AI_WORKSPACE_AUTH_TOKEN    : ${token}
@@ -1912,16 +1915,16 @@ start_macos_target_services() {
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.qmd.plist" >/dev/null 2>&1 || true
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.hermes.plist" >/dev/null 2>&1 || true
 
-    info "Starting LiteLLM on http://127.0.0.1:4000 ..."
+    info "Starting LiteLLM on http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT} ..."
     deploy_launch_agent \
         "plus.svc.xworkspace.litellm" \
         "$HOME" \
-        "exec /usr/bin/env PATH='$tool_path' DATABASE_URL='$litellm_database_url' LITELLM_MASTER_KEY=\"\$(cat '$config_dir/auth-token')\" LITELLM_SALT_KEY=\"\$(cat '$config_dir/auth-token')\" UI_USERNAME=admin UI_PASSWORD=\"\$(cat '$config_dir/auth-token')\" DEEPSEEK_API_KEY=\"\${DEEPSEEK_API_KEY:-}\" OPENAI_API_KEY=\"\${OPENAI_API_KEY:-}\" '$litellm_bin' --host 127.0.0.1 --port 4000 --config '$litellm_config' --use_prisma_db_push" \
+        "exec /usr/bin/env PATH='$tool_path' DATABASE_URL='$litellm_database_url' LITELLM_MASTER_KEY=\"\$(cat '$config_dir/auth-token')\" LITELLM_SALT_KEY=\"\$(cat '$config_dir/auth-token')\" UI_USERNAME=admin UI_PASSWORD=\"\$(cat '$config_dir/auth-token')\" DEEPSEEK_API_KEY=\"\${DEEPSEEK_API_KEY:-}\" OPENAI_API_KEY=\"\${OPENAI_API_KEY:-}\" '$litellm_bin' --host 127.0.0.1 --port ${AI_WORKSPACE_LITELLM_PORT} --config '$litellm_config' --use_prisma_db_push" \
         "$state_dir/litellm.log" \
         "$state_dir/litellm.err.log"
-    wait_for_url "http://127.0.0.1:4000/ui"
+    wait_for_url "http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/ui"
 
-    info "Configuring OpenClaw models to use unified LiteLLM at http://127.0.0.1:4000/v1 ..."
+    info "Configuring OpenClaw models to use unified LiteLLM at http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/v1 ..."
     node -e "
 const fs = require('fs');
 const path = require('path');
@@ -1935,20 +1938,20 @@ if (!config.models.providers) config.models.providers = {};
 const authToken = fs.readFileSync('$config_dir/auth-token', 'utf8').trim();
 config.models.providers.litellm = {
   api: 'openai-completions',
-  baseUrl: 'http://127.0.0.1:4000/v1',
+  baseUrl: 'http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/v1',
   apiKey: authToken,
   models: [
     {
-      id: 'deepseek/deepseek-v4-flash',
-      name: 'DeepSeek V4 Flash',
+      id: '$AI_WORKSPACE_DEFAULT_MODEL',
+      name: 'Primary Model',
       input: ['text'],
       contextWindow: 128000,
       maxTokens: 8192,
       reasoning: false
     },
     {
-      id: 'deepseek/deepseek-v4-pro',
-      name: 'DeepSeek V4 Pro',
+      id: '$AI_WORKSPACE_FALLBACK_MODEL',
+      name: 'Fallback Reasoning Model',
       input: ['text'],
       contextWindow: 128000,
       maxTokens: 8192,
@@ -1959,9 +1962,9 @@ config.models.providers.litellm = {
 if (!config.agents) config.agents = { defaults: { models: {} }, list: [] };
 if (!config.agents.defaults) config.agents.defaults = { models: {} };
 if (!config.agents.defaults.models) config.agents.defaults.models = {};
-config.agents.defaults.models['deepseek/deepseek-v4-flash'] = { alias: 'DeepSeek' };
+config.agents.defaults.models['$AI_WORKSPACE_DEFAULT_MODEL'] = { alias: 'Default Agent' };
 if (!config.agents.defaults.model) config.agents.defaults.model = {};
-config.agents.defaults.model.primary = 'deepseek/deepseek-v4-flash';
+config.agents.defaults.model.primary = '$AI_WORKSPACE_DEFAULT_MODEL';
 fs.mkdirSync(path.dirname(file), { recursive: true });
 fs.writeFileSync(file, JSON.stringify(config, null, 2));
 "
@@ -2057,7 +2060,7 @@ deploy_macos_local() {
     ensure_port_available_for_repo 8788 "$console_dir"
     ensure_port_available 8787
     ensure_port_available_for_repo 17000 "$console_dir"
-    ensure_port_available 4000
+    ensure_port_available ${AI_WORKSPACE_LITELLM_PORT}
     ensure_port_available 18789
     ensure_port_available 8200
     ensure_port_available 7681
