@@ -12,6 +12,7 @@ export function Topbar({
   summary,
   metrics,
   onToggleSidebar,
+  onLogout,
 }: {
   labels: Labels;
   selectedLabel: string | null;
@@ -19,6 +20,7 @@ export function Topbar({
   summary: { runningServices: number; runningAgents: number };
   metrics: RuntimeMetrics;
   onToggleSidebar: () => void;
+  onLogout?: () => void;
 }) {
   const breadcrumbItems = [labels.product, labels.workspace, selectedLabel].filter(Boolean) as string[];
   const [time, setTime] = useState('');
@@ -52,9 +54,11 @@ export function Topbar({
         <button className="round-button" type="button" aria-label="Notifications">
           <Icon name="bell" />
         </button>
-        <button className="profile-button" type="button" aria-label="Profile">
-          X
-        </button>
+        {onLogout && (
+          <button className="round-button" type="button" aria-label="Logout" title="Logout" onClick={onLogout}>
+            <Icon name="log-out" />
+          </button>
+        )}
       </div>
     </header>
   );

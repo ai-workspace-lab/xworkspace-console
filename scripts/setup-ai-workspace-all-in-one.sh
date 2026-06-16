@@ -857,33 +857,26 @@ macos_ttyd_bin() {
 
 macos_xworkmate_bridge_bin() {
     local bridge_dir="$HOME/.local/src/xworkmate-bridge"
-    local bridge_bin="$bridge_dir/xworkmate-go-core"
-    if [ -x "$bridge_bin" ]; then
-        printf '%s\n' "$bridge_bin"
-        return
-    fi
     info "Building XWorkmate Bridge locally under $bridge_dir..."
-    mkdir -p "$bridge_dir"
+    mkdir -p "$HOME/.local/src"
     if [ ! -d "$bridge_dir/.git" ]; then
-        git clone https://github.com/ai-workspace-services/xworkmate-bridge.git "$bridge_dir"
+        git clone "${XWORKMATE_BRIDGE_REPO_URL:-https://github.com/ai-workspace-lab/xworkmate-bridge.git}" "$bridge_dir" >&2
     fi
-    (cd "$bridge_dir" && go build -o "$bridge_bin" .)
-    printf '%s\n' "$bridge_bin"
+    (cd "$bridge_dir" && git fetch origin >&2 && git reset --quiet --hard "origin/${XWORKMATE_BRIDGE_BRANCH:-main}" >&2 && go build -o xworkmate-go-core)
+    echo "$bridge_dir/xworkmate-go-core"
 }
 
 macos_qmd_bin() {
     local qmd_dir="$HOME/.local/src/qmd"
     local qmd_bin="$qmd_dir/bin/qmd"
-    if [ -x "$qmd_bin" ]; then
-        printf '%s\n' "$qmd_bin"
-        return
-    fi
     info "Building QMD locally under $qmd_dir..."
-    mkdir -p "$qmd_dir"
+    mkdir -p "$HOME/.local/src"
     if [ ! -d "$qmd_dir/.git" ]; then
-        git clone https://github.com/ai-workspace-services/qmd.git "$qmd_dir"
+        local qmd_repo_url="${QMD_SOURCE_REPO:-https://github.com/ai-workspace-lab/qmd.git}"
+        qmd_repo_url="${qmd_repo_url#file://}"
+        git clone "$qmd_repo_url" "$qmd_dir" >&2
     fi
-    (cd "$qmd_dir" && npm install && npm run build)
+    (cd "$qmd_dir" && npm install >&2 && npm run build >&2)
     printf '%s\n' "$qmd_bin"
 }
 
@@ -1529,7 +1522,7 @@ wait_for_url() {
             status="$(curl -sS -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)"
         fi
         case "$status" in
-            2*|3*|401) return 0 ;;
+            2*|3*|401|400) return 0 ;;
         esac
         sleep 0.5
     done
@@ -1617,7 +1610,6 @@ print_parallel_service_statuses() {
         "PostgreSQL"
         "Vault"
         "LiteLLM"
-        "Runtime desktop/browser"
     )
     local units=(
         "xworkspace-console.service xworkspace-api.service"
@@ -1895,14 +1887,14 @@ start_macos_target_services() {
         "$state_dir/ttyd.err.log"
     wait_for_url "http://127.0.0.1:7681/"
 
-    info "Starting XWorkMate Bridge on http://127.0.0.1:8787/metrics ..."
+    info "Starting XWorkMate Bridge on http://127.0.0.1:8787/ ..."
     deploy_launch_agent \
         "plus.svc.xworkspace.bridge" \
         "$HOME" \
         "exec /usr/bin/env PATH='$tool_path' INTERNAL_SERVICE_TOKEN=\"\$(cat '$config_dir/auth-token')\" '$bridge_bin' serve --listen 127.0.0.1:8787" \
         "$state_dir/bridge.log" \
         "$state_dir/bridge.err.log"
-    wait_for_url "http://127.0.0.1:8787/metrics"
+    wait_for_url "http://127.0.0.1:8787/"
 
     info "Starting QMD MCP on http://127.0.0.1:8181/mcp ..."
     deploy_launch_agent \
@@ -1957,14 +1949,14 @@ deploy_macos_local() {
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.qmd.plist" >/dev/null 2>&1 || true
     launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.hermes.plist" >/dev/null 2>&1 || true
     ensure_port_available_for_repo 8788 "$console_dir"
-    ensure_port_available_for_repo 8787 "$console_dir"
+    ensure_port_available 8787
     ensure_port_available_for_repo 17000 "$console_dir"
-    ensure_port_available_for_repo 4000 "$console_dir"
-    ensure_port_available_for_repo 18789 "$console_dir"
-    ensure_port_available_for_repo 8200 "$console_dir"
-    ensure_port_available_for_repo 7681 "$console_dir"
-    ensure_port_available_for_repo 8181 "$console_dir"
-    ensure_port_available_for_repo 3920 "$console_dir"
+    ensure_port_available 4000
+    ensure_port_available 18789
+    ensure_port_available 8200
+    ensure_port_available 7681
+    ensure_port_available 8181
+    ensure_port_available 3920
 
     info "Building dashboard assets..."
     (cd "$console_dir/dashboard" && npm install && npm run build)

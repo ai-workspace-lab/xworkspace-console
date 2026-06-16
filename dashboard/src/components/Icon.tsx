@@ -42,6 +42,7 @@ const paths: Record<string, React.ReactNode> = {
   'panel-expand': <path d="M4 6h16M12 12h8M4 18h16M6 9.5 8.5 12 6 14.5" />,
   rocket: <path d="M5 16c-1 1-1.5 4-1.5 4S6.5 19.5 7.5 18.5M14 4c3 0 6 3 6 6-2.5 5-7 9-11 10l-5-5C5 11 9.5 6.5 14 4Zm0 4a2 2 0 1 0 .01 4A2 2 0 0 0 14 8Z" />,
   help: <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2.5 6.5a2.5 2.5 0 1 1 3.7 2.2c-.8.45-1.2.9-1.2 1.8M12 17h.01" />,
+  'log-out': <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
 };
 
 export function Icon({ name }: { name: string }) {
