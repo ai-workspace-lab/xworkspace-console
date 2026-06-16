@@ -1089,10 +1089,19 @@ ensure_litellm_venv() {
         rm -rf "$venv_dir"
         "$py_bin" -m venv "$venv_dir"
         "$venv_dir/bin/python" -m pip install --upgrade pip
-        "$venv_dir/bin/python" -m pip install 'litellm[proxy,extra-proxy]'
+        if [ -d "/Users/shenlan/workspaces/ai-workspace-service/litellm" ]; then
+            info "Installing local LiteLLM from /Users/shenlan/workspaces/ai-workspace-service/litellm ..."
+            "$venv_dir/bin/python" -m pip install -e "/Users/shenlan/workspaces/ai-workspace-service/litellm[proxy,extra-proxy]"
+        else
+            "$venv_dir/bin/python" -m pip install 'litellm[proxy,extra-proxy]'
+        fi
         return
     fi
-    if ! "$venv_dir/bin/python" -c 'import prisma' >/dev/null 2>&1; then
+
+    if [ -d "/Users/shenlan/workspaces/ai-workspace-service/litellm" ]; then
+        info "Ensuring local LiteLLM is installed and updated..."
+        "$venv_dir/bin/python" -m pip install -e "/Users/shenlan/workspaces/ai-workspace-service/litellm[proxy,extra-proxy]"
+    elif ! "$venv_dir/bin/python" -c 'import prisma' >/dev/null 2>&1; then
         info "Adding LiteLLM database dependencies to existing virtualenv..."
         "$venv_dir/bin/python" -m pip install 'litellm[extra-proxy]'
     fi
