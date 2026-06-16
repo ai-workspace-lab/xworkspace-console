@@ -1712,18 +1712,30 @@ cli_status_line() {
 }
 
 print_deployment_summary() {
-    local domain=${SERVER_DOMAIN:-${XWORKMATE_BRIDGE_DOMAIN:-${BRIDGE_DOMAIN:-${ACP_BRIDGE_DOMAIN:-acp-bridge.onwalk.net}}}}
+    local domain=${SERVER_DOMAIN:-${XWORKMATE_BRIDGE_DOMAIN:-${BRIDGE_DOMAIN:-${ACP_BRIDGE_DOMAIN:-xworkmate-bridge.svc.plus}}}}
     local token=$1
     local vault_token="${VAULT_SERVER_ROOT_ACCESS_TOKEN:-$token}"
     local vault_token_display="$vault_token"
     local bridge_url="https://${domain}"
     local portal_url="http://127.0.0.1:17000"
+    local is_darwin=false
 
-    if [ "${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}" != "true" ]; then
+    if [ "$(detect_os)" = "darwin" ]; then
+        is_darwin=true
+    fi
+
+    local bridge_label="唯一公开"
+    if [ "${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}" != "true" ] || [ "$is_darwin" = "true" ]; then
         bridge_url="http://127.0.0.1:8787"
+        bridge_label="本地"
     fi
     if [ "$vault_token" = "$token" ]; then
         vault_token_display="same as AI_WORKSPACE_AUTH_TOKEN"
+    fi
+
+    local cred_label="[一次性凭据]（仅显示一次）"
+    if [ "$is_darwin" = "true" ]; then
+        cred_label="[请安全保存到 MacOS KeyStore，可从 ~/.ai_workspace_auth_token 重复查看]"
     fi
 
     cat <<EOF
@@ -1731,9 +1743,9 @@ print_deployment_summary() {
 ================ AI Workspace 部署摘要 ================
 [访问入口]
   Workspace Portal (Console) : ${portal_url}      (本地)
-  XWorkMate Bridge           : ${bridge_url}   ← 唯一公开
+  XWorkMate Bridge           : ${bridge_url}   ← ${bridge_label}
 
-[一次性凭据]（仅显示一次）
+${cred_label}
   AI_WORKSPACE_AUTH_TOKEN    : ${token}
   Vault root token           : ${vault_token_display}
 
