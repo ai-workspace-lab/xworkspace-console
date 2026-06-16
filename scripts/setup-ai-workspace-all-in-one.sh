@@ -1921,6 +1921,51 @@ start_macos_target_services() {
         "$state_dir/litellm.err.log"
     wait_for_url "http://127.0.0.1:4000/ui"
 
+    info "Configuring OpenClaw models to use unified LiteLLM at http://127.0.0.1:4000/v1 ..."
+    node -e "
+const fs = require('fs');
+const path = require('path');
+const file = path.join(process.env.HOME, '.openclaw', 'openclaw.json');
+let config = {};
+if (fs.existsSync(file)) {
+  config = JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+if (!config.models) config.models = { mode: 'merge', providers: {} };
+if (!config.models.providers) config.models.providers = {};
+const authToken = fs.readFileSync('$config_dir/auth-token', 'utf8').trim();
+config.models.providers.litellm = {
+  api: 'openai-completions',
+  baseUrl: 'http://127.0.0.1:4000/v1',
+  apiKey: authToken,
+  models: [
+    {
+      id: 'deepseek/deepseek-v4-flash',
+      name: 'DeepSeek V4 Flash',
+      input: ['text'],
+      contextWindow: 128000,
+      maxTokens: 8192,
+      reasoning: false
+    },
+    {
+      id: 'deepseek/deepseek-v4-pro',
+      name: 'DeepSeek V4 Pro',
+      input: ['text'],
+      contextWindow: 128000,
+      maxTokens: 8192,
+      reasoning: true
+    }
+  ]
+};
+if (!config.agents) config.agents = { defaults: { models: {} }, list: [] };
+if (!config.agents.defaults) config.agents.defaults = { models: {} };
+if (!config.agents.defaults.models) config.agents.defaults.models = {};
+config.agents.defaults.models['deepseek/deepseek-v4-flash'] = { alias: 'DeepSeek' };
+if (!config.agents.defaults.model) config.agents.defaults.model = {};
+config.agents.defaults.model.primary = 'deepseek/deepseek-v4-flash';
+fs.mkdirSync(path.dirname(file), { recursive: true });
+fs.writeFileSync(file, JSON.stringify(config, null, 2));
+"
+
     info "Starting OpenClaw on http://127.0.0.1:18789/channels ..."
     deploy_launch_agent \
         "plus.svc.xworkspace.openclaw" \
