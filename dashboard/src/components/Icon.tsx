@@ -19,6 +19,7 @@ const paths: Record<string, React.ReactNode> = {
   shield: <path d="M12 3 20 6v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z" />,
   cube: <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9" />,
   terminal: <path d="m5 8 4 4-4 4M11 17h8" />,
+  power: <path d="M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10" />,
   settings: <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0-5v3M12 18v3M4.2 5.6l2.1 2.1M17.7 16.3l2.1 2.1M3 12h3M18 12h3M4.2 18.4l2.1-2.1M17.7 7.7l2.1-2.1" />,
   menu: <path d="M5 7h14M5 12h14M5 17h14" />,
   globe: <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-8 9h16M12 3c2.2 2.4 3.3 5.4 3.3 9S14.2 18.6 12 21M12 3C9.8 5.4 8.7 8.4 8.7 12S9.8 18.6 12 21" />,

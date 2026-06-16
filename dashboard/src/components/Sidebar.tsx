@@ -83,7 +83,7 @@ export function Sidebar({
           onClick={onResetAuthClick}
           style={{ color: '#d32f2f' }}
         >
-          <Icon name="terminal" />
+          <Icon name="power" />
           <strong>{!collapsed ? 'Reset Token' : ''}</strong>
         </button>
         <button className="sidebar-tool-button" type="button" aria-label={collapsed ? labels.expand : labels.collapse} onClick={onToggle}>
