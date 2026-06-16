@@ -1753,10 +1753,12 @@ print_deployment_summary() {
 [访问入口]
   Workspace Portal (Console) : ${portal_url}      (本地)
   XWorkMate Bridge           : ${bridge_url}   ← ${bridge_label}
+  LiteLLM API Endpoint       : http://127.0.0.1:4000      (本地)
 
 ${cred_label}
   AI_WORKSPACE_AUTH_TOKEN    : ${token}
   Vault root token           : ${vault_token_display}
+  LiteLLM API Token          : same as AI_WORKSPACE_AUTH_TOKEN
 
 [服务状态]
 EOF
@@ -1914,7 +1916,7 @@ start_macos_target_services() {
     deploy_launch_agent \
         "plus.svc.xworkspace.litellm" \
         "$HOME" \
-        "exec /usr/bin/env PATH='$tool_path' DATABASE_URL='$litellm_database_url' LITELLM_MASTER_KEY=\"\$(cat '$config_dir/auth-token')\" LITELLM_SALT_KEY=\"\$(cat '$config_dir/auth-token')\" UI_USERNAME=admin UI_PASSWORD=\"\$(cat '$config_dir/auth-token')\" '$litellm_bin' --host 127.0.0.1 --port 4000 --config '$litellm_config' --use_prisma_db_push" \
+        "exec /usr/bin/env PATH='$tool_path' DATABASE_URL='$litellm_database_url' LITELLM_MASTER_KEY=\"\$(cat '$config_dir/auth-token')\" LITELLM_SALT_KEY=\"\$(cat '$config_dir/auth-token')\" UI_USERNAME=admin UI_PASSWORD=\"\$(cat '$config_dir/auth-token')\" DEEPSEEK_API_KEY=\"\${DEEPSEEK_API_KEY:-\$(cat '$config_dir/auth-token')}\" OPENAI_API_KEY=\"\${OPENAI_API_KEY:-\$(cat '$config_dir/auth-token')}\" '$litellm_bin' --host 127.0.0.1 --port 4000 --config '$litellm_config' --use_prisma_db_push" \
         "$state_dir/litellm.log" \
         "$state_dir/litellm.err.log"
     wait_for_url "http://127.0.0.1:4000/ui"
