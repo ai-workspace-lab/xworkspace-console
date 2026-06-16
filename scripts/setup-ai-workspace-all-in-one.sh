@@ -340,6 +340,42 @@ install_prerequisites() {
     success "Dependencies installed."
 }
 
+ensure_public_edge_firewall_ports() {
+    if [ "$(detect_os)" != "linux" ]; then
+        return
+    fi
+
+    local sudo_cmd=()
+    if [ "$(id -u)" -ne 0 ]; then
+        sudo_cmd=(sudo)
+    fi
+
+    if command -v ufw >/dev/null 2>&1; then
+        local ufw_status
+        ufw_status="$(ufw status 2>/dev/null || "${sudo_cmd[@]}" ufw status 2>/dev/null || true)"
+        if printf '%s\n' "$ufw_status" | grep -qi '^Status:[[:space:]]*active'; then
+            info "UFW is active; allowing SSH, HTTP, and HTTPS ingress for AI Workspace."
+            "${sudo_cmd[@]}" ufw allow 22/tcp >/dev/null || warn "Unable to allow 22/tcp in UFW."
+            "${sudo_cmd[@]}" ufw allow 80/tcp >/dev/null || warn "Unable to allow 80/tcp in UFW."
+            "${sudo_cmd[@]}" ufw allow 443/tcp >/dev/null || warn "Unable to allow 443/tcp in UFW."
+        else
+            info "UFW is not active; no UFW ingress changes required."
+        fi
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        local firewalld_state
+        firewalld_state="$(firewall-cmd --state 2>/dev/null || "${sudo_cmd[@]}" firewall-cmd --state 2>/dev/null || true)"
+        if [ "$firewalld_state" = "running" ]; then
+            info "firewalld is running; allowing SSH, HTTP, and HTTPS ingress for AI Workspace."
+            "${sudo_cmd[@]}" firewall-cmd --permanent --add-service=ssh >/dev/null || warn "Unable to allow ssh in firewalld."
+            "${sudo_cmd[@]}" firewall-cmd --permanent --add-service=http >/dev/null || warn "Unable to allow http in firewalld."
+            "${sudo_cmd[@]}" firewall-cmd --permanent --add-service=https >/dev/null || warn "Unable to allow https in firewalld."
+            "${sudo_cmd[@]}" firewall-cmd --reload >/dev/null || warn "Unable to reload firewalld."
+        fi
+    fi
+}
+
 offline_mode_is_force() {
     case "$(printf '%s' "${AI_WORKSPACE_OFFLINE_MODE:-auto}" | tr '[:upper:]' '[:lower:]')" in
         force|required|true|1|yes) return 0 ;;
@@ -2023,6 +2059,7 @@ fi
 if [ "$OS_NAME" = "linux" ]; then
     acquire_deployment_lock
     wait_for_apt_locks
+    ensure_public_edge_firewall_ports
     if try_bootstrap_from_offline_package; then
         exit 0
     fi
