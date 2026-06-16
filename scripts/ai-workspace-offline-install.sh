@@ -144,12 +144,18 @@ EOF
 }
 
 configure_local_git_sources() {
-  local git_dir="${ROOT}/repos/xworkspace-console/.git"
-  [ -d "${git_dir}" ] || return
-  if ! git config --system --get-all safe.directory 2>/dev/null | grep -Fxq "${git_dir}"; then
-    git config --system --add safe.directory "${git_dir}"
-    SAFE_GIT_DIRS+=("${git_dir}")
-  fi
+  local repo_dir
+  for repo_dir in \
+    "${ROOT}/repos/xworkspace-console" \
+    "${ROOT}/repos/xworkspace-core-skills" \
+    "${ROOT}/repos/xworkmate-bridge" \
+    "${ROOT}/repos/playbooks"; do
+    [ -d "${repo_dir}/.git" ] || continue
+    if ! git config --system --get-all safe.directory 2>/dev/null | grep -Fxq "${repo_dir}"; then
+      git config --system --add safe.directory "${repo_dir}"
+      SAFE_GIT_DIRS+=("${repo_dir}")
+    fi
+  done
 }
 
 append_available_package() {
