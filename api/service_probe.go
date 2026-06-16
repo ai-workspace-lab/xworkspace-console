@@ -27,7 +27,7 @@ func NewServiceProbe() ServiceProbe {
 			{Name: "XWorkspace Console", Units: []string{"xworkspace-console.service"}, Port: 17000, URL: "http://127.0.0.1:17000"},
 			{Name: "OpenClaw Gateway", Units: []string{"xworkspace-openclaw.service", "openclaw-gateway.service"}, Port: 18789, URL: "http://127.0.0.1:18789/channels"},
 			{Name: "XWorkmate Bridge", Units: []string{"xworkspace-bridge.service", "xworkmate-bridge.service"}, Port: 8787, URL: "http://127.0.0.1:8787/api/ping"},
-			{Name: "LiteLLM", Units: []string{"xworkspace-litellm.service", "litellm-proxy.service"}, Port: 4000, URL: "http://127.0.0.1:4000/ui"},
+			{Name: "AI Gateway Manager", Units: []string{"xworkspace-litellm.service", "litellm-proxy.service"}, Port: 4000, URL: "http://127.0.0.1:4000/ui"},
 			{Name: "Vault", Units: []string{"xworkspace-vault.service", "vault.service"}, Port: 8200, URL: "http://127.0.0.1:8200/ui/"},
 			{Name: "Terminal", Units: []string{"xworkspace-ttyd.service", "ttyd.service"}, Port: 7681, URL: "http://127.0.0.1:7681"},
 		},

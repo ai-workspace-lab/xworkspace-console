@@ -64,7 +64,7 @@ export type NavSection = { id: string; titleKey: string; items: NavSectionItem[]
 export const portalServices: PortalService[] = [
   {
     key: 'litellm',
-    name: 'LiteLLM Admin UI',
+    name: 'AI Gateway Manager',
     url: 'http://localhost:4000/ui',
     openMode: 'iframe',
     description: 'Model routing and provider administration.',

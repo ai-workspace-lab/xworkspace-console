@@ -66,7 +66,7 @@ func defaultPortalServices() []PortalService {
 	return []PortalService{
 		{
 			Key:         "litellm",
-			Name:        "LiteLLM Admin UI",
+			Name:        "AI Gateway Manager",
 			URL:         "http://localhost:4000/ui",
 			OpenMode:    "iframe",
 			HealthURL:   "http://127.0.0.1:4000/ui",
