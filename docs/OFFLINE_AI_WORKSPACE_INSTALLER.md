@@ -46,10 +46,13 @@ prepared.
 The default package source is:
 
 ```text
-https://github.com/ai-workspace-lab/xworkspace-console/releases/latest/download/ai-workspace-all-in-one-offline-<distro>-<version>-<arch>.tar.gz
+https://github.com/ai-workspace-lab/xworkspace-console/releases/download/<tag>/ai-workspace-all-in-one-offline-<distro>-<version>-<arch>.tar.gz
 ```
 
-The latest release tag follows the `offline-ai-workspace-*` pattern.
+When `AI_WORKSPACE_OFFLINE_RELEASE_TAG=latest`, the bootstrap asks GitHub for
+the newest non-draft release that actually contains the matching tarball asset,
+so it will skip a `releases/latest` target if that release is missing the file.
+Pinned release tags still work as before.
 
 For private mirrors or pinned releases, use:
 

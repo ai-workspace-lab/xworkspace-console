@@ -394,6 +394,15 @@ detect_offline_target() {
     printf '%s %s %s\n' "$distro" "$version" "$arch"
 }
 
+github_api() {
+    local path=$1
+    local headers=(-H "Accept: application/vnd.github+json")
+    if [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]; then
+        headers+=(-H "Authorization: Bearer ${GH_TOKEN:-${GITHUB_TOKEN}}")
+    fi
+    curl -fsSL --retry 5 --retry-all-errors "${headers[@]}" "https://api.github.com${path}"
+}
+
 offline_package_filename() {
     local target=$1
     # shellcheck disable=SC2086
@@ -401,9 +410,38 @@ offline_package_filename() {
     printf 'ai-workspace-all-in-one-offline-%s-%s-%s.tar.gz\n' "$1" "$2" "$3"
 }
 
+resolve_offline_release_tag() {
+    local filename=$1
+    local repo="${AI_WORKSPACE_OFFLINE_REPO:-ai-workspace-lab/xworkspace-console}"
+    local requested_tag="${AI_WORKSPACE_OFFLINE_RELEASE_TAG:-latest}"
+    local tag=""
+
+    if [ "$requested_tag" != "latest" ]; then
+        printf '%s\n' "$requested_tag"
+        return
+    fi
+
+    tag="$(
+        github_api "/repos/${repo}/releases?per_page=100" |
+            jq -r --arg name "${filename}" '
+                [ .[]
+                  | select(.draft == false)
+                  | select(any(.assets[]?; .name == $name))
+                  | .tag_name
+                ][0] // empty
+            '
+    )"
+
+    [ -n "$tag" ] && printf '%s\n' "$tag"
+}
+
 offline_release_url() {
     local filename=$1
-    local tag="${AI_WORKSPACE_OFFLINE_RELEASE_TAG:-latest}"
+    local tag
+    tag="$(resolve_offline_release_tag "$filename")"
+    if [ -z "$tag" ]; then
+        tag="${AI_WORKSPACE_OFFLINE_RELEASE_TAG:-latest}"
+    fi
     if [ "$tag" = "latest" ]; then
         printf 'https://github.com/%s/releases/latest/download/%s\n' "$AI_WORKSPACE_OFFLINE_REPO" "$filename"
     else
