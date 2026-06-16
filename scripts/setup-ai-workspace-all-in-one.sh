@@ -1033,11 +1033,11 @@ resolve_console_dir() {
     local checkout_dir="${XWORKSPACE_CONSOLE_CHECKOUT_DIR:-$HOME/xworkspace-console}"
     if [ -d "$checkout_dir/.git" ]; then
         info "Updating xworkspace-console checkout at $checkout_dir..."
-        git -C "$checkout_dir" fetch origin >&2
-        git -C "$checkout_dir" reset --hard origin/main >&2
+        git -C "$checkout_dir" fetch origin >/dev/null 2>&1
+        git -C "$checkout_dir" reset --hard origin/main >/dev/null 2>&1
     else
         info "Cloning xworkspace-console to $checkout_dir..."
-        git clone "$XWORKSPACE_CONSOLE_REPO_URL" "$checkout_dir" >&2
+        git clone "$XWORKSPACE_CONSOLE_REPO_URL" "$checkout_dir" >/dev/null 2>&1
     fi
     cd "$checkout_dir"
     pwd
