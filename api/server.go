@@ -31,6 +31,7 @@ func (s *Server) ListenAndServe(addr string) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/status", s.authStatusHandler)
+	mux.HandleFunc("/auth/reset", s.resetAuthHandler)
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/services", s.servicesHandler)
 	mux.HandleFunc("/portal/services", s.portalServicesHandler)
@@ -124,4 +125,24 @@ func writeJSON(w http.ResponseWriter, v any) {
 	if err := enc.Encode(v); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s *Server) resetAuthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req ResetAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	newToken, err := s.auth.ResetAuthToken(req.CurrentToken)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]string{"token": newToken})
 }

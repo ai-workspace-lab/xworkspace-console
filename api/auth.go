@@ -1,11 +1,16 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type AuthConfig struct {
@@ -95,4 +100,64 @@ func constantTimeTokenEqual(actual string, expected string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) == 1
+}
+
+type ResetAuthRequest struct {
+	CurrentToken string `json:"currentToken"`
+}
+
+func generateNewToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+func (a *AuthConfig) ResetAuthToken(currentToken string) (string, error) {
+	if !a.Required() {
+		return "", fmt.Errorf("auth is not required")
+	}
+
+	valid := false
+	for _, expected := range a.tokens {
+		if constantTimeTokenEqual(currentToken, expected) {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return "", fmt.Errorf("invalid current token")
+	}
+
+	newToken := generateNewToken()
+	home, err := os.UserHomeDir()
+	if err == nil {
+		path1 := filepath.Join(home, ".ai_workspace_auth_token")
+		path2 := filepath.Join(home, ".config", "xworkspace", "auth-token")
+		os.MkdirAll(filepath.Dir(path2), 0700)
+		os.WriteFile(path1, []byte(newToken), 0600)
+		os.WriteFile(path2, []byte(newToken), 0600)
+	}
+
+	a.tokens = append([]string{newToken}, a.tokens...)
+
+	// Schedule a delayed restart of related system services so the response can be sent first.
+	go func() {
+		time.Sleep(1 * time.Second)
+		services := []string{
+			"plus.svc.xworkspace.litellm",
+			"plus.svc.xworkspace.openclaw",
+			"plus.svc.xworkspace.hermes",
+			"plus.svc.xworkspace.vault",
+			"plus.svc.xworkspace.bridge",
+			"plus.svc.xworkspace.qmd",
+			"plus.svc.xworkspace.api",
+			"plus.svc.xworkspace.console",
+		}
+		uid := fmt.Sprintf("gui/%d", os.Getuid())
+		for _, svc := range services {
+			_ = exec.Command("launchctl", "kickstart", "-k", fmt.Sprintf("%s/%s", uid, svc)).Run()
+		}
+	}()
+
+	return newToken, nil
 }

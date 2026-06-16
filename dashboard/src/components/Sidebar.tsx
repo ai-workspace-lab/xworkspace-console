@@ -13,6 +13,7 @@ export function Sidebar({
   onOpen,
   onToggleLanguage,
   onToggleTheme,
+  onResetAuthClick,
   theme,
   remoteMode,
   onToggleRemoteMode,
@@ -25,6 +26,7 @@ export function Sidebar({
   onOpen: (item: NavItem) => void;
   onToggleLanguage: () => void;
   onToggleTheme: () => void;
+  onResetAuthClick: () => void;
   theme: 'light' | 'dark';
   remoteMode: boolean;
   onToggleRemoteMode: () => void;
@@ -73,6 +75,17 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-tools">
+        <button 
+          className="sidebar-tool-button" 
+          type="button" 
+          aria-label="Reset Auth Token" 
+          title="Reset Auth Token" 
+          onClick={onResetAuthClick}
+          style={{ color: '#d32f2f' }}
+        >
+          <Icon name="terminal" />
+          <strong>{!collapsed ? 'Reset Token' : ''}</strong>
+        </button>
         <button className="sidebar-tool-button" type="button" aria-label={collapsed ? labels.expand : labels.collapse} onClick={onToggle}>
           <Icon name={collapsed ? 'panel-expand' : 'panel-collapse'} />
         </button>

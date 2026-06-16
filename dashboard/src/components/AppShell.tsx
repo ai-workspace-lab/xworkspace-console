@@ -20,6 +20,7 @@ import { Topbar } from './Topbar';
 import { WorkspaceTabs } from './WorkspaceTabs';
 import { WorkspaceHome } from './WorkspaceHome';
 import { ServicePanel } from './ServicePanel';
+import { ResetAuthModal } from './ResetAuthModal';
 
 export function AppShell() {
   const [selectedTab, setSelectedTab] = useState('workspace');
@@ -38,6 +39,7 @@ export function AppShell() {
   const [tokenLoaded, setTokenLoaded] = useState(false);
   const [authError, setAuthError] = useState(false);
   const [authChecking, setAuthChecking] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -193,6 +195,7 @@ export function AppShell() {
         onOpen={openTab}
         onToggleLanguage={() => setLanguage((value) => (value === 'en' ? 'zh' : 'en'))}
         onToggleTheme={() => setTheme((value) => (value === 'light' ? 'dark' : 'light'))}
+        onResetAuthClick={() => setShowResetModal(true)}
         theme={theme}
         remoteMode={remoteMode}
         onToggleRemoteMode={toggleRemoteMode}
@@ -221,6 +224,21 @@ export function AppShell() {
           <WorkspaceHome labels={labels} services={currentServices} metrics={metrics} portalServices={portalServicesConfig} onOpenService={openTab} />
         )}
       </main>
+
+      {showResetModal && (
+        <ResetAuthModal
+          labels={labels}
+          onClose={() => setShowResetModal(false)}
+          onResetSuccess={(newToken) => {
+            window.localStorage.setItem('xworkspace-bridge-token', newToken);
+            setAuthToken(newToken);
+            setTokenInput(newToken);
+            setShowResetModal(false);
+            alert(`Token reset successfully! New token has been saved to your browser session.\n\nPlease note: System services are restarting and may be briefly unavailable.`);
+            window.location.reload();
+          }}
+        />
+      )}
     </div>
   );
 }
