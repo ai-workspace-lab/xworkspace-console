@@ -1033,11 +1033,11 @@ resolve_console_dir() {
     local checkout_dir="${XWORKSPACE_CONSOLE_CHECKOUT_DIR:-$HOME/xworkspace-console}"
     if [ -d "$checkout_dir/.git" ]; then
         info "Updating xworkspace-console checkout at $checkout_dir..."
-        git -C "$checkout_dir" fetch origin
-        git -C "$checkout_dir" reset --hard origin/main
+        git -C "$checkout_dir" fetch origin >&2
+        git -C "$checkout_dir" reset --hard origin/main >&2
     else
         info "Cloning xworkspace-console to $checkout_dir..."
-        git clone "$XWORKSPACE_CONSOLE_REPO_URL" "$checkout_dir"
+        git clone "$XWORKSPACE_CONSOLE_REPO_URL" "$checkout_dir" >&2
     fi
     cd "$checkout_dir"
     pwd
@@ -1804,8 +1804,8 @@ ensure_macos_litellm_database() {
     local config_dir=$1
     local state_dir=$2
     local tool_path=$3
-    local pg_port="${AI_WORKSPACE_LITELLM_POSTGRES_PORT:-15432}"
-    local pg_data="$HOME/.local/share/xworkspace/postgres-data"
+    local pg_port="${AI_WORKSPACE_LITELLM_POSTGRES_PORT:-5432}"
+    local pg_data="$state_dir/postgres-data"
     local pg_socket_dir="$state_dir/postgres-socket"
     local db_name="litellm"
     local db_user="litellm"
@@ -1813,32 +1813,34 @@ ensure_macos_litellm_database() {
     local db_password postgres_bin initdb_bin psql_bin pg_isready_bin
 
     db_password="$(ensure_secret_file "$db_password_file")"
-    postgres_bin="$(macos_postgres_tool postgres)"
-    initdb_bin="$(macos_postgres_tool initdb)"
     psql_bin="$(macos_postgres_tool psql)"
     pg_isready_bin="$(macos_postgres_tool pg_isready)"
 
-    mkdir -p "$pg_data" "$pg_socket_dir"
-    chmod 700 "$pg_socket_dir"
-    if [ ! -f "$pg_data/PG_VERSION" ]; then
-        info "Initializing local PostgreSQL data directory at $pg_data ..."
-        "$initdb_bin" -D "$pg_data" --auth-local=trust --auth-host=scram-sha-256 >/dev/null
+    # MacOS 不支持 docker，MacOS 单机模式不适用自建的 plus.svc.xworkspace.postgres.plist 
+    # 和独立的 $HOME/.local/share/xworkspace/postgres-data 数据目录。
+    # Linux VPS 支持 docker，默认使用自建封装好的 PostgreSQL 部署逻辑。
+    # 因此这里直接调用原生 brew services start 来启动持久化后台服务。
+    if command -v brew >/dev/null 2>&1; then
+        info "Starting local PostgreSQL via Homebrew services..."
+        if brew list postgresql@16 >/dev/null 2>&1; then
+            brew services start postgresql@16 >/dev/null
+        else
+            brew services start postgresql >/dev/null
+        fi
+    else
+        error "Homebrew is required to start PostgreSQL on macOS"
     fi
 
-    launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.postgres.plist" >/dev/null 2>&1 || true
-    sleep 1
-    ensure_port_available "$pg_port"
+    # Wait for postgres to be ready on 127.0.0.1:5432
+    local attempts=60
+    for _ in $(seq 1 "$attempts"); do
+        if "$pg_isready_bin" -h 127.0.0.1 -p "$pg_port" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.5
+    done
 
-    info "Starting local PostgreSQL for LiteLLM on 127.0.0.1:$pg_port ..."
-    deploy_launch_agent \
-        "plus.svc.xworkspace.postgres" \
-        "$HOME" \
-        "exec /usr/bin/env PATH='$tool_path' '$postgres_bin' -D '$pg_data' -h 127.0.0.1 -p '$pg_port' -k '$pg_socket_dir'" \
-        "$state_dir/postgres.log" \
-        "$state_dir/postgres.err.log"
-    wait_for_postgres "$pg_isready_bin" "$pg_socket_dir" "$pg_port"
-
-    "$psql_bin" -h "$pg_socket_dir" -p "$pg_port" -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
+    "$psql_bin" -h 127.0.0.1 -p "$pg_port" -d postgres -v ON_ERROR_STOP=1 >/dev/null <<SQL
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$db_user') THEN
