@@ -2353,9 +2353,49 @@ uninstall_ai_workspace() {
     exit 0
 }
 
-# Check for uninstall command
+# Check for commands
 if [ "${1:-}" = "uninstall" ]; then
     uninstall_ai_workspace "${2:-}"
+elif [ "${1:-}" = "migrate" ]; then
+    source_host=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --source)
+                source_host="$2"
+                shift 2
+                ;;
+            migrate)
+                shift
+                ;;
+            *)
+                error "Unknown argument: $1"
+                ;;
+        esac
+    done
+
+    if [ -z "$source_host" ]; then
+        error "Migration requires --source <user@host>"
+    fi
+    
+    # Parse user and host
+    migrate_user="${source_host%%@*}"
+    migrate_host="${source_host#*@}"
+    if [ "$migrate_user" = "$migrate_host" ]; then
+        migrate_user="ubuntu" # default user if not specified
+    fi
+
+    info "Starting AI Workspace migration from $source_host..."
+    wait_for_apt_locks
+    
+    # Run the migration playbook
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-migration.yml \
+        --vault-password-file "$VAULT_FILE" \
+        -e "migrate_source_host=$migrate_host" \
+        -e "migrate_source_user=$migrate_user" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || error "Migration failed."
+    
+    success "AI Workspace migration complete."
+    exit 0
 fi
 
 # 6. Run Ansible Playbook locally
