@@ -2158,6 +2158,194 @@ export LITELLM_CADDY_CONFIG_ENABLED="${LITELLM_CADDY_CONFIG_ENABLED:-false}"
 export VAULT_DEPLOY_MODE="${VAULT_DEPLOY_MODE:-standalone}"
 export XWORKMATE_BRIDGE_VALIDATION_BASE_URL="${XWORKMATE_BRIDGE_VALIDATION_BASE_URL:-http://127.0.0.1:8787}"
 
+# Check for commands
+if [ "${1:-}" = "sync" ]; then
+    info "Starting AI Workspace offline package synchronization..."
+    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ]; then
+        error "Already running from offline package. Sync is not required."
+    fi
+    if offline_mode_is_off; then
+        error "Offline package sync disabled by AI_WORKSPACE_OFFLINE_MODE=$AI_WORKSPACE_OFFLINE_MODE"
+    fi
+    if [ "$(detect_os)" != "linux" ]; then
+        error "Offline package synchronization is only supported on Linux."
+    fi
+
+    target="$(detect_offline_target)" || error "No supported offline package target detected for this host."
+    filename="$(offline_package_filename "$target")"
+    source="$(offline_package_source "$filename")"
+    if [ -z "$source" ]; then
+        error "No offline package source is configured."
+    fi
+
+    root="$(prepare_offline_package_root "$source" "$filename")" || error "Unable to prepare offline package from $source."
+    success "Offline base package successfully synchronized and extracted to: $root"
+
+    # Helper for component packages
+    sync_component() {
+        local repo=$1
+        local file=$2
+        local extract_path=$3
+        local url
+        local tag
+        tag="$(github_api "/repos/${repo}/releases?per_page=100" | jq -r --arg name "${file}" '[ .[] | select(.draft == false) | select(any(.assets[]?; .name == $name)) | .tag_name ][0] // empty')"
+        if [ -z "$tag" ]; then
+            warn "Could not find release for $file in $repo"
+            return 1
+        fi
+        url="https://github.com/${repo}/releases/download/${tag}/${file}"
+        local cache_key
+        cache_key="$(printf '%s' "$url" | sha256_stream | cut -c1-16)"
+        local package="$AI_WORKSPACE_OFFLINE_WORK_DIR/${cache_key}-${file}"
+        local partial="${package}.part"
+        
+        if ! tar -tzf "$package" >/dev/null 2>&1; then
+            info "Downloading component package: $url"
+            if ! curl -fL --retry 3 --retry-delay 5 --continue-at - -o "$partial" "$url"; then
+                rm -f "$partial"
+                curl -fL --retry 3 --retry-delay 5 -o "$partial" "$url" || return 1
+            fi
+            mv "$partial" "$package"
+        else
+            info "Reusing cached component package: $package"
+        fi
+        
+        mkdir -p "$extract_path"
+        tar -xzf "$package" -C "$extract_path"
+        success "Component extracted to $extract_path"
+    }
+
+    # Extract target metadata for component filenames
+    # shellcheck disable=SC2086
+    set -- $target
+    distro=$1
+    version=$2
+    arch=$3
+
+    info "Starting synchronization for discrete component packages..."
+    sync_component "ai-workspace-services/litellm" "litellm-runtime-${distro}-${version}-${arch}.tar.gz" "${root}/repos/litellm" || warn "LiteLLM component sync failed."
+    sync_component "ai-workspace-services/qmd" "qmd-runtime-linux-${arch}.tar.gz" "${root}/repos/qmd" || warn "QMD component sync failed."
+    sync_component "ai-workspace-lab/xworkmate-bridge" "xworkmate-bridge-linux-${arch}.tar.gz" "${root}/repos/xworkmate-bridge" || warn "Xworkmate Bridge component sync failed."
+    sync_component "ai-workspace-lab/xworkspace-console" "xworkspace-console-runtime-linux-${arch}.tar.gz" "${root}/repos/xworkspace-console" || warn "XWorkspace Console component sync failed."
+
+    success "Phase 1 complete. You can now run the script again without arguments to begin Phase 2 (deployment)."
+    exit 0
+elif [ "${1:-}" = "uninstall" ]; then
+    uninstall_ai_workspace "${2:-}"
+elif [ "${1:-}" = "backup" ]; then
+    backup_file="ai-workspace-backup.tar.gz.enc"
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --output)
+                backup_file="$2"
+                shift 2
+                ;;
+            backup)
+                shift
+                ;;
+            *)
+                error "Unknown argument: $1"
+                ;;
+        esac
+    done
+
+    # resolve absolute path for backup_file
+    case "$backup_file" in
+        /*) ;;
+        *) backup_file="$PWD/$backup_file" ;;
+    esac
+
+    info "Starting AI Workspace backup to $backup_file..."
+    wait_for_apt_locks
+    
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-backup.yml \
+        --vault-password-file "$VAULT_FILE" \
+        -e "backup_output_file=$backup_file" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || error "Backup failed."
+    
+    success "Backup complete: $backup_file"
+    exit 0
+elif [ "${1:-}" = "restore" ]; then
+    restore_file=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --input)
+                restore_file="$2"
+                shift 2
+                ;;
+            restore)
+                shift
+                ;;
+            *)
+                error "Unknown argument: $1"
+                ;;
+        esac
+    done
+
+    if [ -z "$restore_file" ]; then
+        error "Restore requires --input <file>"
+    fi
+    if [ ! -f "$restore_file" ]; then
+        error "Backup file not found: $restore_file"
+    fi
+
+    # resolve absolute path for restore_file
+    case "$restore_file" in
+        /*) ;;
+        *) restore_file="$PWD/$restore_file" ;;
+    esac
+
+    info "Starting AI Workspace restore from $restore_file..."
+    wait_for_apt_locks
+    
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-restore.yml \
+        --vault-password-file "$VAULT_FILE" \
+        -e "backup_input_file=$restore_file" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || error "Restore failed."
+    
+    success "Restore complete."
+    exit 0
+elif [ "${1:-}" = "migrate" ]; then
+    source_host=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --source)
+                source_host="$2"
+                shift 2
+                ;;
+            migrate)
+                shift
+                ;;
+            *)
+                error "Unknown argument: $1"
+                ;;
+        esac
+    done
+
+    if [ -z "$source_host" ]; then
+        error "Migration requires --source <user@host>"
+    fi
+    
+    # Parse user and host
+    migrate_user="${source_host%%@*}"
+    migrate_host="${source_host#*@}"
+    if [ "$migrate_user" = "$migrate_host" ]; then
+        migrate_user="ubuntu" # default user if not specified
+    fi
+
+    info "Starting AI Workspace migration from $source_host..."
+    wait_for_apt_locks
+    
+    # Run the migration playbook
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-migration.yml \
+        --vault-password-file "$VAULT_FILE" \
+        -e "migrate_source_host=$migrate_host" \
+        -e "migrate_source_user=$migrate_user" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || error "Migration failed."
+    
+    success "AI Workspace migration complete."
+    exit 0
+fi
 # 2. Clone Repository
 if [ -n "$PLAYBOOK_DIR" ]; then
     [ -d "$PLAYBOOK_DIR" ] || error "PLAYBOOK_DIR does not exist: $PLAYBOOK_DIR"
@@ -2359,194 +2547,6 @@ uninstall_ai_workspace() {
     exit 0
 }
 
-# Check for commands
-if [ "${1:-}" = "sync" ]; then
-    info "Starting AI Workspace offline package synchronization..."
-    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ]; then
-        error "Already running from offline package. Sync is not required."
-    fi
-    if offline_mode_is_off; then
-        error "Offline package sync disabled by AI_WORKSPACE_OFFLINE_MODE=$AI_WORKSPACE_OFFLINE_MODE"
-    fi
-    if [ "$(detect_os)" != "linux" ]; then
-        error "Offline package synchronization is only supported on Linux."
-    fi
-
-    target="$(detect_offline_target)" || error "No supported offline package target detected for this host."
-    filename="$(offline_package_filename "$target")"
-    source="$(offline_package_source "$filename")"
-    if [ -z "$source" ]; then
-        error "No offline package source is configured."
-    fi
-
-    root="$(prepare_offline_package_root "$source" "$filename")" || error "Unable to prepare offline package from $source."
-    success "Offline base package successfully synchronized and extracted to: $root"
-
-    # Helper for component packages
-    sync_component() {
-        local repo=$1
-        local file=$2
-        local extract_path=$3
-        local url
-        local tag
-        tag="$(github_api "/repos/${repo}/releases?per_page=100" | jq -r --arg name "${file}" '[ .[] | select(.draft == false) | select(any(.assets[]?; .name == $name)) | .tag_name ][0] // empty')"
-        if [ -z "$tag" ]; then
-            warn "Could not find release for $file in $repo"
-            return 1
-        fi
-        url="https://github.com/${repo}/releases/download/${tag}/${file}"
-        local cache_key
-        cache_key="$(printf '%s' "$url" | sha256_stream | cut -c1-16)"
-        local package="$AI_WORKSPACE_OFFLINE_WORK_DIR/${cache_key}-${file}"
-        local partial="${package}.part"
-        
-        if ! tar -tzf "$package" >/dev/null 2>&1; then
-            info "Downloading component package: $url"
-            if ! curl -fL --retry 3 --retry-delay 5 --continue-at - -o "$partial" "$url"; then
-                rm -f "$partial"
-                curl -fL --retry 3 --retry-delay 5 -o "$partial" "$url" || return 1
-            fi
-            mv "$partial" "$package"
-        else
-            info "Reusing cached component package: $package"
-        fi
-        
-        mkdir -p "$extract_path"
-        tar -xzf "$package" -C "$extract_path"
-        success "Component extracted to $extract_path"
-    }
-
-    # Extract target metadata for component filenames
-    # shellcheck disable=SC2086
-    set -- $target
-    distro=$1
-    version=$2
-    arch=$3
-
-    info "Starting synchronization for discrete component packages..."
-    sync_component "ai-workspace-services/litellm" "litellm-runtime-${distro}-${version}-${arch}.tar.gz" "${root}/repos/litellm" || warn "LiteLLM component sync failed."
-    sync_component "ai-workspace-services/qmd" "qmd-runtime-linux-${arch}.tar.gz" "${root}/repos/qmd" || warn "QMD component sync failed."
-    sync_component "ai-workspace-lab/xworkmate-bridge" "xworkmate-bridge-linux-${arch}.tar.gz" "${root}/repos/xworkmate-bridge" || warn "Xworkmate Bridge component sync failed."
-    sync_component "ai-workspace-lab/xworkspace-console" "xworkspace-console-runtime-linux-${arch}.tar.gz" "${root}/repos/xworkspace-console" || warn "XWorkspace Console component sync failed."
-
-    success "Phase 1 complete. You can now run the script again without arguments to begin Phase 2 (deployment)."
-    exit 0
-elif [ "${1:-}" = "uninstall" ]; then
-    uninstall_ai_workspace "${2:-}"
-elif [ "${1:-}" = "backup" ]; then
-    backup_file="ai-workspace-backup.tar.gz.enc"
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --output)
-                backup_file="$2"
-                shift 2
-                ;;
-            backup)
-                shift
-                ;;
-            *)
-                error "Unknown argument: $1"
-                ;;
-        esac
-    done
-
-    # resolve absolute path for backup_file
-    case "$backup_file" in
-        /*) ;;
-        *) backup_file="$PWD/$backup_file" ;;
-    esac
-
-    info "Starting AI Workspace backup to $backup_file..."
-    wait_for_apt_locks
-    
-    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-backup.yml \
-        --vault-password-file "$VAULT_FILE" \
-        -e "backup_output_file=$backup_file" \
-        "${ANSIBLE_EXTRA_VARS[@]}" || error "Backup failed."
-    
-    success "Backup complete: $backup_file"
-    exit 0
-elif [ "${1:-}" = "restore" ]; then
-    restore_file=""
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --input)
-                restore_file="$2"
-                shift 2
-                ;;
-            restore)
-                shift
-                ;;
-            *)
-                error "Unknown argument: $1"
-                ;;
-        esac
-    done
-
-    if [ -z "$restore_file" ]; then
-        error "Restore requires --input <file>"
-    fi
-    if [ ! -f "$restore_file" ]; then
-        error "Backup file not found: $restore_file"
-    fi
-
-    # resolve absolute path for restore_file
-    case "$restore_file" in
-        /*) ;;
-        *) restore_file="$PWD/$restore_file" ;;
-    esac
-
-    info "Starting AI Workspace restore from $restore_file..."
-    wait_for_apt_locks
-    
-    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-restore.yml \
-        --vault-password-file "$VAULT_FILE" \
-        -e "backup_input_file=$restore_file" \
-        "${ANSIBLE_EXTRA_VARS[@]}" || error "Restore failed."
-    
-    success "Restore complete."
-    exit 0
-elif [ "${1:-}" = "migrate" ]; then
-    source_host=""
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --source)
-                source_host="$2"
-                shift 2
-                ;;
-            migrate)
-                shift
-                ;;
-            *)
-                error "Unknown argument: $1"
-                ;;
-        esac
-    done
-
-    if [ -z "$source_host" ]; then
-        error "Migration requires --source <user@host>"
-    fi
-    
-    # Parse user and host
-    migrate_user="${source_host%%@*}"
-    migrate_host="${source_host#*@}"
-    if [ "$migrate_user" = "$migrate_host" ]; then
-        migrate_user="ubuntu" # default user if not specified
-    fi
-
-    info "Starting AI Workspace migration from $source_host..."
-    wait_for_apt_locks
-    
-    # Run the migration playbook
-    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-migration.yml \
-        --vault-password-file "$VAULT_FILE" \
-        -e "migrate_source_host=$migrate_host" \
-        -e "migrate_source_user=$migrate_user" \
-        "${ANSIBLE_EXTRA_VARS[@]}" || error "Migration failed."
-    
-    success "AI Workspace migration complete."
-    exit 0
-fi
 
 # 6. Run Ansible Playbook locally
 wait_for_apt_locks
