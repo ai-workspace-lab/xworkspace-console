@@ -76,12 +76,11 @@ export function Sidebar({
 
       <div className="sidebar-tools">
         <button 
-          className="sidebar-tool-button" 
+          className="sidebar-tool-button danger-button" 
           type="button" 
-          aria-label="Reset Auth Token" 
-          title="Reset Auth Token" 
+          aria-label="Token Reset / Token 轮换" 
+          title="Token Reset / Token 轮换" 
           onClick={onResetAuthClick}
-          style={{ color: '#d32f2f' }}
         >
           <Icon name="power" />
           <strong>{!collapsed ? 'Reset Token' : ''}</strong>
