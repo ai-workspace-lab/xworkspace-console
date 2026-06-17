@@ -2374,7 +2374,55 @@ if [ "${1:-}" = "sync" ]; then
     fi
 
     root="$(prepare_offline_package_root "$source" "$filename")" || error "Unable to prepare offline package from $source."
-    success "Offline package successfully synchronized and extracted to: $root"
+    success "Offline base package successfully synchronized and extracted to: $root"
+
+    # Helper for component packages
+    sync_component() {
+        local repo=$1
+        local file=$2
+        local extract_path=$3
+        local url
+        local tag
+        tag="$(github_api "/repos/${repo}/releases?per_page=100" | jq -r --arg name "${file}" '[ .[] | select(.draft == false) | select(any(.assets[]?; .name == $name)) | .tag_name ][0] // empty')"
+        if [ -z "$tag" ]; then
+            warn "Could not find release for $file in $repo"
+            return 1
+        fi
+        url="https://github.com/${repo}/releases/download/${tag}/${file}"
+        local cache_key
+        cache_key="$(printf '%s' "$url" | sha256_stream | cut -c1-16)"
+        local package="$AI_WORKSPACE_OFFLINE_WORK_DIR/${cache_key}-${file}"
+        local partial="${package}.part"
+        
+        if ! tar -tzf "$package" >/dev/null 2>&1; then
+            info "Downloading component package: $url"
+            if ! curl -fL --retry 3 --retry-delay 5 --continue-at - -o "$partial" "$url"; then
+                rm -f "$partial"
+                curl -fL --retry 3 --retry-delay 5 -o "$partial" "$url" || return 1
+            fi
+            mv "$partial" "$package"
+        else
+            info "Reusing cached component package: $package"
+        fi
+        
+        mkdir -p "$extract_path"
+        tar -xzf "$package" -C "$extract_path"
+        success "Component extracted to $extract_path"
+    }
+
+    # Extract target metadata for component filenames
+    # shellcheck disable=SC2086
+    set -- $target
+    distro=$1
+    version=$2
+    arch=$3
+
+    info "Starting synchronization for discrete component packages..."
+    sync_component "ai-workspace-services/litellm" "litellm-runtime-${distro}-${version}-${arch}.tar.gz" "${root}/repos/litellm" || warn "LiteLLM component sync failed."
+    sync_component "ai-workspace-services/qmd" "qmd-runtime-linux-${arch}.tar.gz" "${root}/repos/qmd" || warn "QMD component sync failed."
+    sync_component "ai-workspace-lab/xworkmate-bridge" "xworkmate-bridge-linux-${arch}.tar.gz" "${root}/repos/xworkmate-bridge" || warn "Xworkmate Bridge component sync failed."
+    sync_component "ai-workspace-lab/xworkspace-console" "xworkspace-console-runtime-linux-${arch}.tar.gz" "${root}/repos/xworkspace-console" || warn "XWorkspace Console component sync failed."
+
     success "Phase 1 complete. You can now run the script again without arguments to begin Phase 2 (deployment)."
     exit 0
 elif [ "${1:-}" = "uninstall" ]; then
