@@ -2135,9 +2135,15 @@ if [ "$OS_NAME" = "linux" ]; then
     acquire_deployment_lock
     wait_for_apt_locks
     ensure_public_edge_firewall_ports
-    if try_bootstrap_from_offline_package; then
-        exit 0
-    fi
+    # Skip offline bootstrap when running a subcommand that handles its own flow
+    case "${1:-}" in
+        sync|uninstall|backup|restore|migrate) ;;
+        *)
+            if try_bootstrap_from_offline_package; then
+                exit 0
+            fi
+            ;;
+    esac
 fi
 
 if ! command -v ansible-playbook >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
