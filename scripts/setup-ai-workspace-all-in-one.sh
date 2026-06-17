@@ -1936,6 +1936,7 @@ if (fs.existsSync(file)) {
 }
 if (!config.models) config.models = { mode: 'merge', providers: {} };
 if (!config.models.providers) config.models.providers = {};
+if (!config.gateway) config.gateway = { mode: 'local' };
 const authToken = fs.readFileSync('$config_dir/auth-token', 'utf8').trim();
 config.models.providers.litellm = {
   api: 'openai-completions',
