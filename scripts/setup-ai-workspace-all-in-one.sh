@@ -1822,6 +1822,7 @@ deploy_launch_agent() {
 EOF
 
     launchctl bootout "$domain" "$plist" >/dev/null 2>&1 || true
+    sleep 0.2
     launchctl bootstrap "$domain" "$plist" >/dev/null
     launchctl kickstart -k "$domain/$label" >/dev/null
 }
