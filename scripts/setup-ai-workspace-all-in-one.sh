@@ -2354,7 +2354,30 @@ uninstall_ai_workspace() {
 }
 
 # Check for commands
-if [ "${1:-}" = "uninstall" ]; then
+if [ "${1:-}" = "sync" ]; then
+    info "Starting AI Workspace offline package synchronization..."
+    if [ "${AI_WORKSPACE_OFFLINE_ACTIVE:-false}" = "true" ]; then
+        error "Already running from offline package. Sync is not required."
+    fi
+    if offline_mode_is_off; then
+        error "Offline package sync disabled by AI_WORKSPACE_OFFLINE_MODE=$AI_WORKSPACE_OFFLINE_MODE"
+    fi
+    if [ "$(detect_os)" != "linux" ]; then
+        error "Offline package synchronization is only supported on Linux."
+    fi
+
+    target="$(detect_offline_target)" || error "No supported offline package target detected for this host."
+    filename="$(offline_package_filename "$target")"
+    source="$(offline_package_source "$filename")"
+    if [ -z "$source" ]; then
+        error "No offline package source is configured."
+    fi
+
+    root="$(prepare_offline_package_root "$source" "$filename")" || error "Unable to prepare offline package from $source."
+    success "Offline package successfully synchronized and extracted to: $root"
+    success "Phase 1 complete. You can now run the script again without arguments to begin Phase 2 (deployment)."
+    exit 0
+elif [ "${1:-}" = "uninstall" ]; then
     uninstall_ai_workspace "${2:-}"
 elif [ "${1:-}" = "backup" ]; then
     backup_file="ai-workspace-backup.tar.gz.enc"
