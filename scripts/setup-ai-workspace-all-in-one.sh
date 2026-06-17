@@ -1964,9 +1964,9 @@ config.models.providers.litellm = {
 if (!config.agents) config.agents = { defaults: { models: {} }, list: [] };
 if (!config.agents.defaults) config.agents.defaults = { models: {} };
 if (!config.agents.defaults.models) config.agents.defaults.models = {};
-config.agents.defaults.models['$AI_WORKSPACE_DEFAULT_MODEL'] = { alias: 'Default Agent' };
+config.agents.defaults.models['litellm/$AI_WORKSPACE_DEFAULT_MODEL'] = { alias: 'Default Agent' };
 if (!config.agents.defaults.model) config.agents.defaults.model = {};
-config.agents.defaults.model.primary = '$AI_WORKSPACE_DEFAULT_MODEL';
+config.agents.defaults.model.primary = 'litellm/$AI_WORKSPACE_DEFAULT_MODEL';
 fs.mkdirSync(path.dirname(file), { recursive: true });
 fs.writeFileSync(file, JSON.stringify(config, null, 2));
 "
@@ -2273,6 +2273,90 @@ fi
 
 # Ensure correct permissions for the vault file
 chmod 600 "$VAULT_FILE"
+
+uninstall_ai_workspace() {
+    local purge=false
+    if [ "${1:-}" = "--purge" ]; then
+        purge=true
+    fi
+
+    info "Starting AI Workspace uninstallation..."
+
+    if [ "$(detect_os)" = "mac" ]; then
+        info "Stopping and removing macOS launch agents..."
+        for svc in api console litellm openclaw vault ttyd bridge qmd hermes; do
+            launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.$svc.plist" >/dev/null 2>&1 || true
+            rm -f "$HOME/Library/LaunchAgents/plus.svc.xworkspace.$svc.plist"
+        done
+        stop_managed_pid "$HOME/.local/state/xworkspace/xworkspace-api.pid" >/dev/null 2>&1 || true
+        stop_managed_pid "$HOME/.local/state/xworkspace/xworkspace-console.pid" >/dev/null 2>&1 || true
+
+        if [ "$purge" = "true" ]; then
+            info "Purging AI Workspace data on macOS..."
+            rm -rf "$HOME/.config/xworkspace"
+            rm -rf "$HOME/.local/state/xworkspace"
+            rm -rf "$HOME/.ai_workspace_auth_token"
+            rm -rf "$HOME/.vault_password"
+            rm -rf "$HOME/.openclaw"
+            rm -rf "/tmp/xworkspace-core-skills"
+            rm -rf "/tmp/xworkmate-bridge"
+            rm -rf "/tmp/ai-workspace-deploy"
+        fi
+    else
+        info "Stopping and removing Linux systemd services..."
+        if command -v systemctl >/dev/null 2>&1; then
+            for svc in xworkspace-litellm xworkspace-qmd xworkspace-api xworkspace-console xworkspace-openclaw xworkmate-bridge xworkspace-ttyd vault postgresql xworkspace-hermes; do
+                systemctl --user stop "$svc.service" >/dev/null 2>&1 || true
+                systemctl --user disable "$svc.service" >/dev/null 2>&1 || true
+                rm -f "$HOME/.config/systemd/user/$svc.service"
+            done
+            systemctl --user daemon-reload >/dev/null 2>&1 || true
+            
+            # System-wide services
+            for svc in xworkspace-litellm xworkspace-qmd xworkspace-api xworkspace-console xworkspace-openclaw xworkmate-bridge xworkspace-ttyd vault postgresql xworkspace-hermes; do
+                if systemctl is-active --quiet "$svc.service" 2>/dev/null; then
+                    sudo systemctl stop "$svc.service" >/dev/null 2>&1 || true
+                    sudo systemctl disable "$svc.service" >/dev/null 2>&1 || true
+                    sudo rm -f "/etc/systemd/system/$svc.service"
+                fi
+            done
+            sudo systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        
+        if command -v docker >/dev/null 2>&1; then
+            info "Removing docker containers..."
+            for container in vault litellm db ai-workspace-console xworkmate-bridge qmd openclaw hermes xworkspace-ttyd; do
+                docker stop "$container" >/dev/null 2>&1 || true
+                docker rm -f "$container" >/dev/null 2>&1 || true
+            done
+        fi
+
+        if [ "$purge" = "true" ]; then
+            info "Purging AI Workspace data on Linux..."
+            rm -rf "$HOME/.config/xworkspace"
+            rm -rf "$HOME/.local/state/xworkspace"
+            rm -rf "$HOME/.ai_workspace_auth_token"
+            rm -rf "$HOME/.vault_password"
+            rm -rf "$HOME/.openclaw"
+            rm -rf "/tmp/xworkspace-core-skills"
+            rm -rf "/tmp/xworkmate-bridge"
+            rm -rf "/tmp/ai-workspace-deploy"
+            rm -rf "$HOME/.config/systemd/user/plus.svc.xworkspace."*
+            if [ "$(id -u)" = "0" ] || sudo -n true 2>/dev/null; then
+                sudo rm -rf "/opt/ai-workspace" >/dev/null 2>&1 || true
+                sudo rm -rf "/etc/ai-workspace" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+
+    success "AI Workspace uninstallation complete."
+    exit 0
+}
+
+# Check for uninstall command
+if [ "${1:-}" = "uninstall" ]; then
+    uninstall_ai_workspace "${2:-}"
+fi
 
 # 6. Run Ansible Playbook locally
 wait_for_apt_locks
