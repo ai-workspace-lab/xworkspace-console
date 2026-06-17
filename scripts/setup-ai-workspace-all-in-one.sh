@@ -2011,7 +2011,7 @@ fs.writeFileSync(file, JSON.stringify(config, null, 2));
     deploy_launch_agent \
         "plus.svc.xworkspace.qmd" \
         "$HOME" \
-        "exec /usr/bin/env PATH='$tool_path' QMD_EMBED_API_BASE_URL=https://integrate.api.nvidia.com/v1 QMD_EMBED_MODEL=nvidia/llama-nemotron-embed-1b-v2 '$qmd_bin' mcp --http --port 8181" \
+        "exec /usr/bin/env PATH='$tool_path' QMD_EMBED_API_BASE_URL=http://127.0.0.1:4000/v1 QMD_EMBED_MODEL=text-embedding-3-small QMD_EMBED_API_KEY=\"\$(cat '$config_dir/auth-token')\" '$qmd_bin' mcp --http --port 8181" \
         "$state_dir/qmd.log" \
         "$state_dir/qmd.err.log"
     wait_for_url "http://127.0.0.1:8181/mcp"
