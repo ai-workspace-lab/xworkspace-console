@@ -2356,6 +2356,79 @@ uninstall_ai_workspace() {
 # Check for commands
 if [ "${1:-}" = "uninstall" ]; then
     uninstall_ai_workspace "${2:-}"
+elif [ "${1:-}" = "backup" ]; then
+    backup_file="ai-workspace-backup.tar.gz.enc"
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --output)
+                backup_file="$2"
+                shift 2
+                ;;
+            backup)
+                shift
+                ;;
+            *)
+                error "Unknown argument: $1"
+                ;;
+        esac
+    done
+
+    # resolve absolute path for backup_file
+    case "$backup_file" in
+        /*) ;;
+        *) backup_file="$PWD/$backup_file" ;;
+    esac
+
+    info "Starting AI Workspace backup to $backup_file..."
+    wait_for_apt_locks
+    
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-backup.yml \
+        --vault-password-file "$VAULT_FILE" \
+        -e "backup_output_file=$backup_file" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || error "Backup failed."
+    
+    success "Backup complete: $backup_file"
+    exit 0
+elif [ "${1:-}" = "restore" ]; then
+    restore_file=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --input)
+                restore_file="$2"
+                shift 2
+                ;;
+            restore)
+                shift
+                ;;
+            *)
+                error "Unknown argument: $1"
+                ;;
+        esac
+    done
+
+    if [ -z "$restore_file" ]; then
+        error "Restore requires --input <file>"
+    fi
+    if [ ! -f "$restore_file" ]; then
+        error "Backup file not found: $restore_file"
+    fi
+
+    # resolve absolute path for restore_file
+    case "$restore_file" in
+        /*) ;;
+        *) restore_file="$PWD/$restore_file" ;;
+    esac
+
+    info "Starting AI Workspace restore from $restore_file..."
+    wait_for_apt_locks
+    
+    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-restore.yml \
+        --vault-password-file "$VAULT_FILE" \
+        -e "backup_input_file=$restore_file" \
+        "${ANSIBLE_EXTRA_VARS[@]}" || error "Restore failed."
+    
+    success "Restore complete."
+    exit 0
 elif [ "${1:-}" = "migrate" ]; then
     source_host=""
     while [[ $# -gt 0 ]]; do
