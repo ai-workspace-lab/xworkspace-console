@@ -2202,6 +2202,13 @@ if [ "$(detect_os)" = "darwin" ]; then
     # is both non-writable under become=false and non-standard for the platform.
     # Relocate it to the Apple-standard per-user app data location instead.
     ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_base_dir=$HOME/Library/Application Support/cloud-neutral/xworkmate-bridge")
+    # PostgreSQL defaults to compose (Docker) mode, which is inappropriate on a
+    # native macOS deploy: it pulls in the apt-based docker role and stores the
+    # admin password under /root. Use native mode (Homebrew postgresql@16 via the
+    # role's macos.yml) and pass the admin password directly so the default
+    # /root/.ai_workspace_postgres_password lookup is never attempted.
+    ANSIBLE_EXTRA_VARS+=("-e" "postgresql_deploy_mode=native")
+    append_secret_var "postgresql_admin_password" "$UNIFIED_AUTH_TOKEN"
 else
     LINUX_CONSOLE_USER="$(linux_default_console_user)"
     LINUX_CONSOLE_HOME="$(linux_default_console_home "$LINUX_CONSOLE_USER")"

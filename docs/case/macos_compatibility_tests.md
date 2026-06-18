@@ -147,6 +147,16 @@
 | **修复方案** | 不再依赖会被 MFA 拦截的登录：改为通过 userpass 的 identity **entity-alias** 解析 `entity_id`——遍历 `identity/entity-alias/id` 找到 name==用户、mount_accessor==userpass accessor 的别名取其 `canonical_id`；首次运行（无别名）则显式创建 entity + entity-alias。移除随之不再需要的 `vault token revoke`。幂等、向后兼容（能识别旧版本登录隐式创建的 entity）。已在真实 playbooks 仓库 `init_vault_admin.sh` 修复；clone 路径由 `patch_playbook_vault_macos()` 同步打补丁 |
 | **定位手段** | 该任务 `no_log: true` 隐藏了错误；临时改 `no_log: false` + register + 将 stdout/stderr 写入挂载目录文件，直接读取得到真实报错 |
 
+## TC-MAC-017: PostgreSQL 在 macOS 误用 compose 模式
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/postgres/tasks/compose.yml`、`roles/vhosts/postgres/defaults/main.yml` |
+| **触发报错** | `TASK [postgres : Materialize PostgreSQL admin password]` 失败（`no_log: true`）。assert `postgresql_admin_password | length > 0` 为空 |
+| **根因** | `postgresql_deploy_mode` 默认 `compose`。compose.yml 走 Docker 路径（检查/安装 apt 版 docker），且 `postgresql_admin_password` 默认经 `lookup('password', '/root/.ai_workspace_postgres_password ...')` 生成——macOS 无权写 `/root`，lookup 失败 → 密码为空 → assert 失败。该角色其实已备 `native`+`macos.yml`（Homebrew postgresql@16）路径，但默认未在 macOS 切换过去 |
+| **目录/模式策略** | macOS 部署 `postgresql_deploy_mode=native`（→ `macos.yml`，brew 安装）；Linux 部署保持默认 `compose` |
+| **修复方案** | 在 `setup-ai-workspace-all-in-one.sh` 的 Darwin 分支注入 `-e postgresql_deploy_mode=native`，并以 `append_secret_var postgresql_admin_password=$UNIFIED_AUTH_TOKEN` 直接提供密码（extra-vars 优先级最高，彻底绕过 `/root` 的 password lookup）。Linux 分支不变 |
+
 ---
 
 ## 修复维度总结
