@@ -255,6 +255,11 @@ jobs:
           fi
           for package in "${packages[@]}"; do
             echo "Uploading ${package}"
+            asset_name="$(basename "$package")"
+            if gh release view "$TAG_NAME" --json assets --jq '.assets[].name' | grep -Fxq "$asset_name"; then
+              echo "Deleting existing release asset ${asset_name} before upload"
+              gh release delete-asset "$TAG_NAME" "$asset_name" --yes
+            fi
             for attempt in 1 2 3; do
               if gh release upload "$TAG_NAME" "$package" --clobber; then
                 break
