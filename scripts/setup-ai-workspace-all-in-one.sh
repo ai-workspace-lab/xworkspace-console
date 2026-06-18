@@ -247,6 +247,16 @@ detect_os() {
     esac
 }
 
+run_as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        error "Root privileges are required to run: $*. Install sudo or rerun this script as root."
+    fi
+}
+
 acquire_deployment_lock() {
     if [ "${AI_WORKSPACE_DEPLOYMENT_LOCK_HELD:-false}" = "true" ]; then
         return
@@ -323,17 +333,17 @@ install_prerequisites() {
     info "Installing required dependencies (git, ansible)..."
     if [ "$os" = "linux" ]; then
         if [ -f /etc/debian_version ]; then
-            sudo apt-get update -y
+            run_as_root apt-get update -y
             if grep -qi ubuntu /etc/os-release 2>/dev/null; then
-                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl software-properties-common
-                sudo apt-add-repository --yes --update ppa:ansible/ansible
-                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ansible
+                run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl software-properties-common
+                run_as_root apt-add-repository --yes --update ppa:ansible/ansible
+                run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ansible
             else
-                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ansible
+                run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ansible
             fi
         elif [ -f /etc/redhat-release ]; then
-            sudo yum install -y epel-release
-            sudo yum install -y git curl ansible
+            run_as_root yum install -y epel-release
+            run_as_root yum install -y git curl ansible
         else
             error "Unsupported Linux distribution. Please install git and ansible manually."
         fi
@@ -806,9 +816,13 @@ resolve_unified_auth_token() {
     fi
 
     if [ -f "$AUTH_TOKEN_FILE" ]; then
-        info "Found existing unified auth token at $AUTH_TOKEN_FILE, reusing it."
-        tr -d '\r\n' < "$AUTH_TOKEN_FILE"
-        return
+        token="$(tr -d '\r\n' < "$AUTH_TOKEN_FILE")"
+        if [ -n "$token" ]; then
+            info "Found existing unified auth token at $AUTH_TOKEN_FILE, reusing it."
+            printf '%s' "$token"
+            return
+        fi
+        warn "Existing unified auth token file is empty; generating a replacement."
     fi
 
     info "No unified auth token provided. Generating a secure random token..."
@@ -1352,6 +1366,23 @@ service_status_line() {
     printf '  %-28s : %-8s (%s)\n' "$label" "$state" "$detail"
 }
 
+cli_status_line() {
+    local label=$1
+    local command_name=$2
+    local version
+
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+        printf '  %-28s : unavailable\n' "$label"
+        return
+    fi
+
+    version="$("$command_name" --version 2>/dev/null | head -n 1 || true)"
+    if [ -z "$version" ]; then
+        version="unknown"
+    fi
+    printf '  %-28s : %s\n' "$label" "$version"
+}
+
 write_service_status() {
     local output_file=$1
     shift
@@ -1524,12 +1555,12 @@ uninstall_ai_workspace() {
             # System-wide services
             for svc in xworkspace-litellm xworkspace-qmd xworkspace-api xworkspace-console xworkspace-openclaw xworkmate-bridge xworkspace-ttyd vault postgresql xworkspace-hermes; do
                 if systemctl is-active --quiet "$svc.service" 2>/dev/null; then
-                    sudo systemctl stop "$svc.service" >/dev/null 2>&1 || true
-                    sudo systemctl disable "$svc.service" >/dev/null 2>&1 || true
-                    sudo rm -f "/etc/systemd/system/$svc.service"
+                    run_as_root systemctl stop "$svc.service" >/dev/null 2>&1 || true
+                    run_as_root systemctl disable "$svc.service" >/dev/null 2>&1 || true
+                    run_as_root rm -f "/etc/systemd/system/$svc.service"
                 fi
             done
-            sudo systemctl daemon-reload >/dev/null 2>&1 || true
+            run_as_root systemctl daemon-reload >/dev/null 2>&1 || true
         fi
         
         if command -v docker >/dev/null 2>&1; then
@@ -1552,8 +1583,8 @@ uninstall_ai_workspace() {
             rm -rf "/tmp/ai-workspace-deploy"
             rm -rf "$HOME/.config/systemd/user/plus.svc.xworkspace."*
             if [ "$(id -u)" = "0" ] || sudo -n true 2>/dev/null; then
-                sudo rm -rf "/opt/ai-workspace" >/dev/null 2>&1 || true
-                sudo rm -rf "/etc/ai-workspace" >/dev/null 2>&1 || true
+                run_as_root rm -rf "/opt/ai-workspace" >/dev/null 2>&1 || true
+                run_as_root rm -rf "/etc/ai-workspace" >/dev/null 2>&1 || true
             fi
         fi
     fi
@@ -1561,6 +1592,13 @@ uninstall_ai_workspace() {
     success "AI Workspace uninstallation complete."
     exit 0
 }
+
+if [ "${AI_WORKSPACE_BOOTSTRAP_LIB_ONLY:-false}" = "true" ]; then
+    if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+        return 0
+    fi
+    exit 0
+fi
 
 info "Starting AI Workspace All-in-One Bootstrap..."
 
@@ -1841,6 +1879,7 @@ ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_quality_gate_fail_on_error=false")
 
 if [ "$(detect_os)" = "darwin" ]; then
     info "Disabling global privilege escalation for macOS..."
+    DARWIN_SERVICE_PATH="$HOME/.nix-profile/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin"
     ANSIBLE_EXTRA_VARS+=("-e" "ansible_become=false")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_user=$(id -un)")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_home=$HOME")
@@ -1848,6 +1887,16 @@ if [ "$(detect_os)" = "darwin" ]; then
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_config_dir=$HOME/.config/ai-workspace")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_scripts_dir=$HOME/xworkspace/scripts")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$HOME/xworkspace-console")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_group=staff")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_ttyd_binary_path=$(command -v ttyd)")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_user=$(id -un)")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_group=staff")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_home=$HOME")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_user=$(id -un)")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_group=staff")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_home=$HOME")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_compile_cache_dir=$HOME/.cache/openclaw-compile-cache")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_path=$DARWIN_SERVICE_PATH")
 fi
 
 # Export environment fallbacks for roles/scripts that read environment directly.
