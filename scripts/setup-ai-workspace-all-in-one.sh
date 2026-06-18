@@ -1172,6 +1172,46 @@ boot_new = (
 )
 if boot_old in tasks_text and boot_new not in tasks_text:
     tasks_text = tasks_text.replace(boot_old, boot_new, 1)
+
+# 2c) DIAGNOSTIC (macOS): the bootstrap runs under no_log so its real failure is
+# hidden. Capture the result (keeping no_log on the script so the password in the
+# command args stays censored) and print only stdout/stderr — which carry no
+# secrets — then assert, so the actual error surfaces instead of a censored blob.
+diag_anchor = (
+    "  no_log: true\n"
+    "  when:\n"
+    "    - not ansible_check_mode\n"
+)
+diag_new = (
+    "  no_log: true\n"
+    "  register: vault_admin_bootstrap_result\n"
+    "  failed_when: false\n"
+    "  when:\n"
+    "    - not ansible_check_mode\n"
+)
+if diag_anchor in tasks_text and "vault_admin_bootstrap_result" not in tasks_text:
+    tasks_text = tasks_text.replace(diag_anchor, diag_new, 1)
+diag_tasks = (
+    "\n- name: Show Vault admin bootstrap diagnostics (macOS)\n"
+    "  ansible.builtin.debug:\n"
+    "    msg:\n"
+    "      - \"rc={{ vault_admin_bootstrap_result.rc | default('n/a') }}\"\n"
+    "      - \"stdout={{ vault_admin_bootstrap_result.stdout_lines | default([]) }}\"\n"
+    "      - \"stderr={{ vault_admin_bootstrap_result.stderr_lines | default([]) }}\"\n"
+    "  when:\n"
+    "    - ansible_os_family == 'Darwin'\n"
+    "    - vault_admin_bootstrap_result is defined\n"
+    "\n- name: Fail when Vault admin bootstrap failed (macOS)\n"
+    "  ansible.builtin.assert:\n"
+    "    that:\n"
+    "      - (vault_admin_bootstrap_result.rc | default(1)) == 0\n"
+    "    fail_msg: \"vault admin bootstrap failed; see diagnostics above\"\n"
+    "  when:\n"
+    "    - ansible_os_family == 'Darwin'\n"
+    "    - vault_admin_bootstrap_result is defined\n"
+)
+if "Show Vault admin bootstrap diagnostics (macOS)" not in tasks_text:
+    tasks_text = tasks_text.rstrip("\n") + "\n" + diag_tasks
 tasks_path.write_text(tasks_text)
 
 # 3) Create the macOS vault dirs (user-owned) before the launchd plist is laid down.
