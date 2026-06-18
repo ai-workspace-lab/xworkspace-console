@@ -117,6 +117,16 @@
 | **目录策略** | Linux 保持 `/etc/vault.d`、`/opt/vault/data`；macOS 改用 Apple 标准 `~/Library/Application Support/vault`、`~/Library/Application Support/vault/data`；二进制路径 macOS 取 `/opt/homebrew/bin/vault`（brew 安装位置），免去需 sudo 的 `/usr/local/bin` 软链依赖 |
 | **修复方案** | role 位于独立 playbooks 仓库，无法从本仓库直接提交；沿用脚本既有的“克隆后打补丁”机制（参见 `patch_playbook_user_systemd`），在 `setup-ai-workspace-all-in-one.sh` 新增 `patch_playbook_vault_macos()`，仅在 Darwin 下对克隆出的 vault 角色：①给目录创建任务追加 `ansible_os_family != 'Darwin'` 守卫；②把 `vault_config_dir`/`vault_data_dir`/`vault_binary_path` 改为按 OS 的三元表达式；③在 `macos.yml` 前置创建用户属主的数据目录（含 launchd 日志目录 `~/.local/state/xworkspace`）。该补丁对 `curl \| bash` 与本地执行两条路径均生效，幂等，且不改动 Linux 行为 |
 
+## TC-MAC-014: common 角色 Linux 基线（timedatectl 等）在 macOS 失败
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/common/tasks/main.yml` |
+| **触发报错** | `TASK [common : Base | set timezone]` → `[Errno 2] No such file or directory: b'timedatectl'`（macOS 无 systemd 的 `timedatectl`） |
+| **根因** | `common` 角色的 `Base | *` 系列任务是 Linux 服务器基线：`timedatectl` 设时区、改写 `/etc/hostname`、`/etc/hosts`、设主机名、加固 SSH、配置 fail2ban、调文件句柄上限、放行防火墙端口。全部 `become: true` 且依赖 Linux 专有工具/路径，在 macOS（`become=false`）下会逐条失败，`set timezone` 只是第一个 |
+| **修复方案** | 经评估这些基线对 macOS 本机开发部署既不适用也无权限执行，故在 `setup-ai-workspace-all-in-one.sh` 新增 `patch_playbook_common_macos()`（同样走克隆后打补丁），仅在 Darwin 下为整个 `Base | *` 块追加 `ansible_os_family != 'Darwin'` 守卫（共 9 处：7 个任务追加 `when`，2 个已有 `when` 列表追加该条件）。`import_tasks` 的 `when` 会传播到子任务，因此 ssh 加固/fail2ban/limits/firewall 子任务一并跳过。幂等、YAML 合法、Linux 行为不变 |
+| **备注** | 用户仅点名 `set timezone`，但其后的 Base 任务会以相同原因连环失败，故一并守卫以避免逐个往返 |
+
 ---
 
 ## 修复维度总结
@@ -127,7 +137,8 @@
 | 权限收缩 (become: false) | TC-002, TC-006, TC-007, TC-008, TC-009 |
 | 用户组适配 (staff vs ubuntu) | TC-003, TC-010 |
 | 目录路径降级 ($HOME vs /home/ubuntu, /opt, /etc) | TC-004, TC-006, TC-009, TC-010, TC-012, TC-013 |
-| 克隆后补丁注入 (post-clone patch) | TC-013 |
+| 克隆后补丁注入 (post-clone patch) | TC-013, TC-014 |
+| Linux 基线整体跳过 (skip Linux baseline on Darwin) | TC-014 |
 | 包管理器绕过 (skip apt on Darwin) | TC-008, TC-010 |
 | 模板变量解耦 (remove nvm/nodejs_version) | TC-005 |
 | 路径空格兼容 (argv vs string) | TC-011 |

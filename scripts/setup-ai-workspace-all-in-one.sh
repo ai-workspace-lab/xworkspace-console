@@ -1177,6 +1177,78 @@ macos_path.write_text(macos_text)
 PY
 }
 
+# The common role's "Base | *" tasks configure a Linux server: set timezone via
+# timedatectl, rewrite /etc/hostname + /etc/hosts, set the hostname, harden ssh,
+# configure fail2ban, raise file limits and open firewall ports. All of them run
+# with become: true and target Linux-only tooling/paths, so they fail on macOS
+# (e.g. timedatectl is absent). Patch the cloned role to skip the entire Base
+# baseline on Darwin. Linux is untouched.
+patch_playbook_common_macos() {
+    local main_file="roles/vhosts/common/tasks/main.yml"
+    [ -f "$main_file" ] || return 0
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("roles/vhosts/common/tasks/main.yml")
+text = path.read_text()
+guard = "  when: ansible_os_family != 'Darwin'\n"
+
+# Tasks that end with a trailing attribute and have no `when:` yet -> append guard.
+append_blocks = [
+    ('- name: Base | set timezone\n'
+     '  ansible.builtin.command: "timedatectl set-timezone Asia/Shanghai"\n'
+     '  changed_when: false\n'
+     '  become: true\n'),
+    ('- name: Base | render /etc/hostname\n'
+     '  ansible.builtin.template:\n'
+     '    src: templates/hostname.j2\n'
+     '    dest: /etc/hostname\n'
+     '    owner: root\n'
+     '    group: root\n'
+     '    mode: "0644"\n'
+     '  become: true\n'),
+    ('- name: Base | set hostname\n'
+     '  ansible.builtin.hostname:\n'
+     '    name: "{{ inventory_hostname }}"\n'
+     '  become: true\n'),
+    ('- name: Base | update /etc/hosts\n'
+     '  ansible.builtin.template:\n'
+     '    src: templates/hosts\n'
+     '    dest: /etc/hosts\n'
+     '    owner: root\n'
+     '    group: root\n'
+     '    mode: "0644"\n'
+     '  become: true\n'),
+    ('- name: Base | harden ssh\n'
+     '  ansible.builtin.script: files/secure_ssh.sh\n'
+     '  become: true\n'),
+    ('- name: Base | harden ssh config\n'
+     '  ansible.builtin.import_tasks: harden_ssh.yml\n'
+     '  tags: [ssh, security]\n'),
+    ('- name: Base | configure fail2ban\n'
+     '  ansible.builtin.import_tasks: fail2ban.yml\n'
+     '  tags: [fail2ban, security]\n'),
+]
+for block in append_blocks:
+    if block in text and (block + guard) not in text:
+        text = text.replace(block, block + guard, 1)
+
+# Tasks that already have a `when:` list -> add the Darwin condition to it.
+when_blocks = [
+    ('  when:\n'
+     '    - common_security_limits.enabled | default(true) | bool\n'),
+    ('  when:\n'
+     '    - common_firewall.enabled | default(true) | bool\n'),
+]
+extra = "    - ansible_os_family != 'Darwin'\n"
+for block in when_blocks:
+    if block in text and (block + extra) not in text:
+        text = text.replace(block, block + extra, 1)
+
+path.write_text(text)
+PY
+}
+
 ensure_core_skills_source() {
     if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
        [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
@@ -1958,6 +2030,7 @@ fi
 patch_playbook_user_systemd
 if [ "$(detect_os)" = "darwin" ]; then
     patch_playbook_vault_macos
+    patch_playbook_common_macos
 fi
 prefetch_independent_sources
 ensure_core_skills_source
