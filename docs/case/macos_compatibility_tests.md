@@ -102,8 +102,10 @@
 |------|------|
 | **触发文件** | `setup-ai-workspace-all-in-one.sh` → `roles/vhosts/xworkmate_bridge`（变量 `xworkmate_bridge_base_dir`） |
 | **触发报错** | `TASK [roles/vhosts/xworkmate_bridge/ : Ensure xworkmate-bridge base directory exists]` → `There was an issue creating /opt/cloud-neutral as requested: [Errno 13] Permission denied: b'/opt/cloud-neutral'` |
-| **根因** | `xworkmate_bridge_base_dir` 默认硬编码为 `/opt/cloud-neutral/xworkmate-bridge`，macOS 以 `ansible_become=false` 运行，无权写入 `/opt`。该 base dir 同时被 `config.yaml`、launchd plist 的 `WorkingDirectory` 引用 |
-| **修复方案** | 沿用既有 macOS 适配约定（`gateway_openclaw_home`、`agent_skills_home` 等均在脚本 Darwin 分支以 `-e` 重定向到 `$HOME`），在 `setup-ai-workspace-all-in-one.sh` 的 Darwin 分支注入 `-e xworkmate_bridge_base_dir=$HOME/.local/state/cloud-neutral/xworkmate-bridge`，无需改动独立的 playbooks 仓库即可在运行时覆盖默认值 |
+| **根因** | `xworkmate_bridge_base_dir` 默认硬编码为 `/opt/cloud-neutral/xworkmate-bridge`，macOS 以 `ansible_become=false` 运行，无权写入 `/opt`；且 `/opt` 并非 macOS 标准目录。该 base dir 同时被 `config.yaml`、launchd plist 的 `WorkingDirectory` 引用 |
+| **目录策略** | Linux 保持 `/opt/cloud-neutral/xworkmate-bridge`；macOS 改用 Apple 标准的用户级应用数据目录 `~/Library/Application Support/cloud-neutral/xworkmate-bridge` |
+| **修复方案** | 双层：①`setup-ai-workspace-all-in-one.sh` 的 Darwin 分支注入 `-e xworkmate_bridge_base_dir="$HOME/Library/Application Support/cloud-neutral/xworkmate-bridge"`（`curl \| bash` 拉取的是本仓库脚本，playbooks 来自独立仓库，故脚本侧 `-e` 是该路径下唯一可生效的修复点）；②role `defaults/main.yml` 将默认值改为按 `ansible_os_family` 的三元表达式，使离线/本地 playbook 路径亦正确 |
+| **生效前提** | `curl \| bash` 从 GitHub `main` 拉取脚本，修复必须先 push 到 `ai-workspace-lab/xworkspace-console` 的 `main`；否则远端仍是旧脚本（extra-vars 优先级最高，若 `-e` 已执行则绝不会回落到 `/opt`，由此可判定执行的是未修复的远端脚本） |
 
 ---
 
