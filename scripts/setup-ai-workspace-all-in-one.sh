@@ -1981,6 +1981,10 @@ if [ "$(detect_os)" = "darwin" ]; then
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_home=$HOME")
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_compile_cache_dir=$HOME/.cache/openclaw-compile-cache")
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_path=$DARWIN_SERVICE_PATH")
+    # XWorkMate Bridge writes its runtime data under a base dir that defaults to
+    # /opt/cloud-neutral on Linux. macOS runs become=false, so /opt is not
+    # writable; relocate the bridge base dir under the user's home instead.
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_base_dir=$HOME/.local/state/cloud-neutral/xworkmate-bridge")
 else
     LINUX_CONSOLE_USER="$(linux_default_console_user)"
     LINUX_CONSOLE_HOME="$(linux_default_console_home "$LINUX_CONSOLE_USER")"
