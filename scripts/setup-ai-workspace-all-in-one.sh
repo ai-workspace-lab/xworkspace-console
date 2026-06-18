@@ -1173,60 +1173,43 @@ boot_new = (
 if boot_old in tasks_text and boot_new not in tasks_text:
     tasks_text = tasks_text.replace(boot_old, boot_new, 1)
 
-# 2c) DIAGNOSTIC (macOS): the bootstrap runs under no_log so its real failure is
-# hidden. Temporarily disable no_log, capture the result, and write rc/stdout/
-# stderr to a file under the user's cloud-neutral-toolkit folder so the actual
-# init_vault_admin.sh error can be inspected directly. Still asserts so the run
-# fails clearly. (Diagnostic only; to be removed once root-caused.)
-diag_anchor = (
-    "  no_log: true\n"
-    "  when:\n"
-    "    - not ansible_check_mode\n"
-)
-diag_new = (
-    "  no_log: false\n"
-    "  register: vault_admin_bootstrap_result\n"
-    "  failed_when: false\n"
-    "  when:\n"
-    "    - not ansible_check_mode\n"
-)
-if diag_anchor in tasks_text and "vault_admin_bootstrap_result" not in tasks_text:
-    tasks_text = tasks_text.replace(diag_anchor, diag_new, 1)
-diag_tasks = (
-    "\n- name: Show Vault admin bootstrap diagnostics (macOS)\n"
-    "  ansible.builtin.debug:\n"
-    "    msg:\n"
-    "      - \"rc={{ vault_admin_bootstrap_result.rc | default('n/a') }}\"\n"
-    "      - \"stdout={{ vault_admin_bootstrap_result.stdout_lines | default([]) }}\"\n"
-    "      - \"stderr={{ vault_admin_bootstrap_result.stderr_lines | default([]) }}\"\n"
-    "  when:\n"
-    "    - ansible_os_family == 'Darwin'\n"
-    "    - vault_admin_bootstrap_result is defined\n"
-    "\n- name: Write Vault bootstrap diagnostics to file (macOS)\n"
-    "  ansible.builtin.copy:\n"
-    "    dest: \"/Users/shenlan/workspaces/cloud-neutral-toolkit/vault-bootstrap-debug.log\"\n"
-    "    content: |\n"
-    "      rc={{ vault_admin_bootstrap_result.rc | default('n/a') }}\n"
-    "      ===== STDOUT =====\n"
-    "      {{ vault_admin_bootstrap_result.stdout | default('') }}\n"
-    "      ===== STDERR =====\n"
-    "      {{ vault_admin_bootstrap_result.stderr | default('') }}\n"
-    "  when:\n"
-    "    - ansible_os_family == 'Darwin'\n"
-    "    - vault_admin_bootstrap_result is defined\n"
-    "  ignore_errors: true\n"
-    "\n- name: Fail when Vault admin bootstrap failed (macOS)\n"
-    "  ansible.builtin.assert:\n"
-    "    that:\n"
-    "      - (vault_admin_bootstrap_result.rc | default(1)) == 0\n"
-    "    fail_msg: \"vault admin bootstrap failed; see diagnostics above / vault-bootstrap-debug.log\"\n"
-    "  when:\n"
-    "    - ansible_os_family == 'Darwin'\n"
-    "    - vault_admin_bootstrap_result is defined\n"
-)
-if "Show Vault admin bootstrap diagnostics (macOS)" not in tasks_text:
-    tasks_text = tasks_text.rstrip("\n") + "\n" + diag_tasks
 tasks_path.write_text(tasks_text)
+
+# 2d) init_vault_admin.sh resolves the admin entity_id by logging in as the
+# user. Once the login MFA enforcement it creates exists, that login is
+# MFA-gated and returns no entity_id, so re-runs fail with "missing entityID".
+# Resolve the entity via its userpass entity-alias instead (idempotent).
+init_path = Path("roles/vhosts/vault/files/init_vault_admin.sh")
+if init_path.exists():
+    init_text = init_path.read_text()
+    login_old = (
+        'bootstrap_json="$(vault write -format=json "auth/userpass/login/${USERNAME}" password="$PASSWORD")"\n'
+        'entity_id="$(printf \'%s\' "$bootstrap_json" | jq -r \'.auth.entity_id\')"\n'
+        'bootstrap_token="$(printf \'%s\' "$bootstrap_json" | jq -r \'.auth.client_token\')"\n'
+    )
+    login_new = (
+        'entity_id=""\n'
+        'for alias_id in $(vault list -format=json identity/entity-alias/id 2>/dev/null | jq -r \'.[]?\'); do\n'
+        '  alias_json="$(vault read -format=json "identity/entity-alias/id/${alias_id}" 2>/dev/null || true)"\n'
+        '  alias_name="$(printf \'%s\' "$alias_json" | jq -r \'.data.name // empty\')"\n'
+        '  alias_mount="$(printf \'%s\' "$alias_json" | jq -r \'.data.mount_accessor // empty\')"\n'
+        '  if [[ "$alias_name" == "$USERNAME" && "$alias_mount" == "$userpass_accessor" ]]; then\n'
+        '    entity_id="$(printf \'%s\' "$alias_json" | jq -r \'.data.canonical_id // empty\')"\n'
+        '    break\n'
+        '  fi\n'
+        'done\n'
+        '\n'
+        'if [[ -z "$entity_id" ]]; then\n'
+        '  entity_id="$(vault write -format=json identity/entity name="$USERNAME" policies="$POLICY_NAME" | jq -r \'.data.id\')"\n'
+        '  vault write identity/entity-alias name="$USERNAME" canonical_id="$entity_id" mount_accessor="$userpass_accessor" >/dev/null\n'
+        'fi\n'
+    )
+    if login_old in init_text:
+        init_text = init_text.replace(login_old, login_new, 1)
+    init_text = init_text.replace(
+        'vault token revoke "$bootstrap_token" >/dev/null || true\n', '', 1
+    )
+    init_path.write_text(init_text)
 
 # 3) Create the macOS vault dirs (user-owned) before the launchd plist is laid down.
 macos_text = macos_path.read_text()

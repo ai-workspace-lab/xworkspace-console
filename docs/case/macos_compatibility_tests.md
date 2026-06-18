@@ -137,6 +137,16 @@
 | **修复方案** | 扩展 `patch_playbook_vault_macos()`：①在 `macos.yml` 增加 `brew install jq`（`creates: /opt/homebrew/bin/jq`）；②给 Bootstrap 任务追加 `environment: PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}"`，确保脚本能找到 brew 安装的 vault/jq。脚本本身已自带 macOS 适配（`base64 -D` 探测）。补丁幂等、YAML 合法、Linux 不变 |
 | **备注** | 若仍失败，可临时将该任务 `no_log` 关掉以查看 `init_vault_admin.sh` 的真实 stderr 再定位 |
 
+## TC-MAC-016: Vault 管理员初始化非幂等（re-run 报 missing entityID）
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/vault/files/init_vault_admin.sh` |
+| **触发报错** | `Error writing data to identity/mfa/method/totp/admin-generate ... Code: 400 ... * missing entityID`，并伴随 `A login request was issued that is subject to MFA validation` |
+| **根因** | 脚本通过“以该用户登录”来获取 `entity_id`（`auth/userpass/login/<user>`）。但脚本随后又创建了 userpass 的 login-MFA enforcement。dev 模式 Vault 在多次部署之间持续运行（launchd 常驻），因此**第二次及以后**的部署中该登录被 MFA 拦截，返回的不是完整 token 而是 MFA 待校验响应，`entity_id` 为空 → `admin-generate` 报 `missing entityID`。这是 re-run 幂等性缺陷，非 macOS 特有（Linux 第二次跑同样会中招） |
+| **修复方案** | 不再依赖会被 MFA 拦截的登录：改为通过 userpass 的 identity **entity-alias** 解析 `entity_id`——遍历 `identity/entity-alias/id` 找到 name==用户、mount_accessor==userpass accessor 的别名取其 `canonical_id`；首次运行（无别名）则显式创建 entity + entity-alias。移除随之不再需要的 `vault token revoke`。幂等、向后兼容（能识别旧版本登录隐式创建的 entity）。已在真实 playbooks 仓库 `init_vault_admin.sh` 修复；clone 路径由 `patch_playbook_vault_macos()` 同步打补丁 |
+| **定位手段** | 该任务 `no_log: true` 隐藏了错误；临时改 `no_log: false` + register + 将 stdout/stderr 写入挂载目录文件，直接读取得到真实报错 |
+
 ---
 
 ## 修复维度总结
