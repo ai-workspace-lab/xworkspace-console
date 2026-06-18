@@ -261,7 +261,7 @@ resolve_required_package() {
 
 case "$(dpkg --print-architecture)" in
   amd64)
-    if apt-cache show "google-chrome-stable=${GOOGLE_CHROME_VERSION}" >/dev/null 2>&1; then
+    if apt-cache madison google-chrome-stable | awk '{print $3}' | grep -Fxq "${GOOGLE_CHROME_VERSION}"; then
       chrome_package="google-chrome-stable=${GOOGLE_CHROME_VERSION}"
     elif apt-cache show google-chrome-stable >/dev/null 2>&1; then
       echo "Required Google Chrome version is unavailable: ${GOOGLE_CHROME_VERSION}; using the repository candidate instead." >&2
