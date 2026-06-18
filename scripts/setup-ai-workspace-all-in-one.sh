@@ -1174,16 +1174,17 @@ if boot_old in tasks_text and boot_new not in tasks_text:
     tasks_text = tasks_text.replace(boot_old, boot_new, 1)
 
 # 2c) DIAGNOSTIC (macOS): the bootstrap runs under no_log so its real failure is
-# hidden. Capture the result (keeping no_log on the script so the password in the
-# command args stays censored) and print only stdout/stderr — which carry no
-# secrets — then assert, so the actual error surfaces instead of a censored blob.
+# hidden. Temporarily disable no_log, capture the result, and write rc/stdout/
+# stderr to a file under the user's cloud-neutral-toolkit folder so the actual
+# init_vault_admin.sh error can be inspected directly. Still asserts so the run
+# fails clearly. (Diagnostic only; to be removed once root-caused.)
 diag_anchor = (
     "  no_log: true\n"
     "  when:\n"
     "    - not ansible_check_mode\n"
 )
 diag_new = (
-    "  no_log: true\n"
+    "  no_log: false\n"
     "  register: vault_admin_bootstrap_result\n"
     "  failed_when: false\n"
     "  when:\n"
@@ -1201,11 +1202,24 @@ diag_tasks = (
     "  when:\n"
     "    - ansible_os_family == 'Darwin'\n"
     "    - vault_admin_bootstrap_result is defined\n"
+    "\n- name: Write Vault bootstrap diagnostics to file (macOS)\n"
+    "  ansible.builtin.copy:\n"
+    "    dest: \"/Users/shenlan/workspaces/cloud-neutral-toolkit/vault-bootstrap-debug.log\"\n"
+    "    content: |\n"
+    "      rc={{ vault_admin_bootstrap_result.rc | default('n/a') }}\n"
+    "      ===== STDOUT =====\n"
+    "      {{ vault_admin_bootstrap_result.stdout | default('') }}\n"
+    "      ===== STDERR =====\n"
+    "      {{ vault_admin_bootstrap_result.stderr | default('') }}\n"
+    "  when:\n"
+    "    - ansible_os_family == 'Darwin'\n"
+    "    - vault_admin_bootstrap_result is defined\n"
+    "  ignore_errors: true\n"
     "\n- name: Fail when Vault admin bootstrap failed (macOS)\n"
     "  ansible.builtin.assert:\n"
     "    that:\n"
     "      - (vault_admin_bootstrap_result.rc | default(1)) == 0\n"
-    "    fail_msg: \"vault admin bootstrap failed; see diagnostics above\"\n"
+    "    fail_msg: \"vault admin bootstrap failed; see diagnostics above / vault-bootstrap-debug.log\"\n"
     "  when:\n"
     "    - ansible_os_family == 'Darwin'\n"
     "    - vault_admin_bootstrap_result is defined\n"
