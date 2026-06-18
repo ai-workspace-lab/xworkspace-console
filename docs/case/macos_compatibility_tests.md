@@ -127,6 +127,16 @@
 | **修复方案** | 经评估这些基线对 macOS 本机开发部署既不适用也无权限执行，故在 `setup-ai-workspace-all-in-one.sh` 新增 `patch_playbook_common_macos()`（同样走克隆后打补丁），仅在 Darwin 下为整个 `Base | *` 块追加 `ansible_os_family != 'Darwin'` 守卫（共 9 处：7 个任务追加 `when`，2 个已有 `when` 列表追加该条件）。`import_tasks` 的 `when` 会传播到子任务，因此 ssh 加固/fail2ban/limits/firewall 子任务一并跳过。幂等、YAML 合法、Linux 行为不变 |
 | **备注** | 用户仅点名 `set timezone`，但其后的 Base 任务会以相同原因连环失败，故一并守卫以避免逐个往返 |
 
+## TC-MAC-015: Vault 管理员初始化脚本在 macOS 缺依赖/缺 PATH
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/vault/tasks/main.yml`（Bootstrap 任务）、`roles/vhosts/vault/files/init_vault_admin.sh`、`roles/vhosts/vault/tasks/macos.yml` |
+| **触发报错** | `TASK [vault : Bootstrap Vault admin userpass auth]` 失败（`no_log: true` 隐藏详情）。vault 此时已起（健康检查已过），失败发生在执行 `init_vault_admin.sh` |
+| **根因** | 脚本 `require_cmd vault/jq/curl/base64`。macOS 默认**不带 jq**，而安装 jq 的 “Install standalone Vault dependencies”（apt）任务带 `!= 'Darwin'` 守卫被跳过 → jq 缺失；同时 `ansible.builtin.script` 使用最小 PATH，未含 Homebrew 的 `/opt/homebrew/bin`，即使已 `brew install` 的 `vault`/`jq` 也可能找不到 |
+| **修复方案** | 扩展 `patch_playbook_vault_macos()`：①在 `macos.yml` 增加 `brew install jq`（`creates: /opt/homebrew/bin/jq`）；②给 Bootstrap 任务追加 `environment: PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}"`，确保脚本能找到 brew 安装的 vault/jq。脚本本身已自带 macOS 适配（`base64 -D` 探测）。补丁幂等、YAML 合法、Linux 不变 |
+| **备注** | 若仍失败，可临时将该任务 `no_log` 关掉以查看 `init_vault_admin.sh` 的真实 stderr 再定位 |
+
 ---
 
 ## 修复维度总结
@@ -139,6 +149,7 @@
 | 目录路径降级 ($HOME vs /home/ubuntu, /opt, /etc) | TC-004, TC-006, TC-009, TC-010, TC-012, TC-013 |
 | 克隆后补丁注入 (post-clone patch) | TC-013, TC-014 |
 | Linux 基线整体跳过 (skip Linux baseline on Darwin) | TC-014 |
+| brew 补依赖 + PATH 注入 (jq via brew, Homebrew on PATH) | TC-015 |
 | 包管理器绕过 (skip apt on Darwin) | TC-008, TC-010 |
 | 模板变量解耦 (remove nvm/nodejs_version) | TC-005 |
 | 路径空格兼容 (argv vs string) | TC-011 |

@@ -1155,6 +1155,23 @@ dir_when_old = (
 dir_when_new = dir_when_old + "    - ansible_os_family != 'Darwin'\n"
 if dir_when_old in tasks_text and "    - ansible_os_family != 'Darwin'\n\n- name: Deploy standalone Vault systemd" not in tasks_text:
     tasks_text = tasks_text.replace(dir_when_old, dir_when_new, 1)
+
+# 2b) The admin bootstrap runs files/init_vault_admin.sh, which require_cmd's
+# vault/jq/curl/base64. On macOS those live under Homebrew, which is not on the
+# minimal PATH ansible.builtin.script uses; prepend the Homebrew bin dirs so the
+# helper can find them.
+boot_old = (
+    '    --ui-url {{ vault_admin_ui_url | quote }}\n'
+    '  no_log: true\n'
+)
+boot_new = (
+    '    --ui-url {{ vault_admin_ui_url | quote }}\n'
+    '  environment:\n'
+    '    PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}"\n'
+    '  no_log: true\n'
+)
+if boot_old in tasks_text and boot_new not in tasks_text:
+    tasks_text = tasks_text.replace(boot_old, boot_new, 1)
 tasks_path.write_text(tasks_text)
 
 # 3) Create the macOS vault dirs (user-owned) before the launchd plist is laid down.
@@ -1173,6 +1190,25 @@ dir_task = (
 anchor = "- name: Install HashiCorp Tap\n"
 if "Ensure macOS Vault directories exist" not in macos_text and anchor in macos_text:
     macos_text = macos_text.replace(anchor, dir_task + anchor, 1)
+
+# jq is not preinstalled on macOS and the Linux apt task that installs it is
+# Darwin-skipped, yet init_vault_admin.sh requires it. Install it via Homebrew.
+vault_brew_old = (
+    "- name: Install Vault via Homebrew\n"
+    "  ansible.builtin.command: brew install hashicorp/tap/vault\n"
+    "  args:\n"
+    "    creates: /opt/homebrew/bin/vault\n"
+    "  changed_when: true\n"
+)
+jq_task = (
+    "\n- name: Install jq via Homebrew (required by Vault admin bootstrap)\n"
+    "  ansible.builtin.command: brew install jq\n"
+    "  args:\n"
+    "    creates: /opt/homebrew/bin/jq\n"
+    "  changed_when: true\n"
+)
+if vault_brew_old in macos_text and "Install jq via Homebrew" not in macos_text:
+    macos_text = macos_text.replace(vault_brew_old, vault_brew_old + jq_task, 1)
 macos_path.write_text(macos_text)
 PY
 }
