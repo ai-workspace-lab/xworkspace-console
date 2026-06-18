@@ -1322,6 +1322,43 @@ path.write_text(text)
 PY
 }
 
+# The postgres native (macOS) path installs postgresql@16 via the
+# community.general.homebrew module, which auto-detects a brew prefix and can
+# pick a stale Intel Homebrew at /usr/local that crashes on newer macOS versions
+# ("unknown or unsupported macOS version"). Replace it with a brew command that
+# runs the brew on PATH (Apple Silicon prefix first), matching vault/openclaw.
+patch_playbook_postgres_macos() {
+    local macos_file="roles/vhosts/postgres/tasks/macos.yml"
+    [ -f "$macos_file" ] || return 0
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("roles/vhosts/postgres/tasks/macos.yml")
+text = path.read_text()
+old = (
+    "- name: Ensure PostgreSQL 16 is installed via Homebrew\n"
+    "  community.general.homebrew:\n"
+    "    name: postgresql@16\n"
+    "    state: present\n"
+)
+new = (
+    "- name: Ensure PostgreSQL 16 is installed via Homebrew\n"
+    "  ansible.builtin.command: brew install postgresql@16\n"
+    "  environment:\n"
+    "    PATH: \"/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}\"\n"
+    "    HOMEBREW_NO_AUTO_UPDATE: \"1\"\n"
+    "  register: postgresql_brew_install\n"
+    "  changed_when: >-\n"
+    "    'already installed' not in (postgresql_brew_install.stderr | default(''))\n"
+    "    and 'already installed' not in (postgresql_brew_install.stdout | default(''))\n"
+    "  failed_when: postgresql_brew_install.rc != 0\n"
+)
+if old in text:
+    text = text.replace(old, new, 1)
+    path.write_text(text)
+PY
+}
+
 ensure_core_skills_source() {
     if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
        [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
@@ -2104,6 +2141,7 @@ patch_playbook_user_systemd
 if [ "$(detect_os)" = "darwin" ]; then
     patch_playbook_vault_macos
     patch_playbook_common_macos
+    patch_playbook_postgres_macos
 fi
 prefetch_independent_sources
 ensure_core_skills_source

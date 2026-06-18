@@ -157,6 +157,16 @@
 | **目录/模式策略** | macOS 部署 `postgresql_deploy_mode=native`（→ `macos.yml`，brew 安装）；Linux 部署保持默认 `compose` |
 | **修复方案** | 在 `setup-ai-workspace-all-in-one.sh` 的 Darwin 分支注入 `-e postgresql_deploy_mode=native`，并以 `append_secret_var postgresql_admin_password=$UNIFIED_AUTH_TOKEN` 直接提供密码（extra-vars 优先级最高，彻底绕过 `/root` 的 password lookup）。Linux 分支不变 |
 
+## TC-MAC-018: postgres native 安装误用过期 Intel Homebrew 崩溃
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/postgres/tasks/macos.yml` |
+| **触发报错** | `Ensure PostgreSQL 16 is installed via Homebrew` → `/usr/local/Homebrew/.../macos_version.rb: unknown or unsupported macOS version: "27.0" (MacOSVersion::Error)` |
+| **根因** | 该任务用 `community.general.homebrew` 模块，模块自行探测 brew 前缀，命中了机器上**过期的 Intel Homebrew**（`/usr/local/Homebrew`），其内置 macOS 版本表不认识 `27.0`，brew 启动即崩溃。而 vault/openclaw 用 `command: brew`（走 PATH 上可用的 brew，如 Apple Silicon 的 `/opt/homebrew`）则正常——这是模块选错 brew，而非 brew 整体不可用 |
+| **修复方案** | 与 vault/openclaw 对齐：改用 `ansible.builtin.command: brew install postgresql@16`，并在 `environment.PATH` 前置 `/opt/homebrew/bin:/usr/local/bin`（优先选可用的 brew），加 `HOMEBREW_NO_AUTO_UPDATE=1`；`register`+`changed_when`/`failed_when` 维持幂等。真实仓库 `macos.yml` 已改；clone 路径由 `patch_playbook_postgres_macos()` 同步补丁 |
+| **备注** | 若该机仅有一个且过期的 brew（纯 Intel），根因为环境，需 `brew update`/重装 Homebrew；本修复在“存在可用 brew”时即可绕过（vault 步骤已证明存在可用 brew） |
+
 ---
 
 ## 修复维度总结
