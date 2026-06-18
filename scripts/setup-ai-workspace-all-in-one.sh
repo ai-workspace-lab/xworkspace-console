@@ -28,6 +28,10 @@ set -euo pipefail
 #     (optional Git source used by the Linux console playbook)
 #   XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE / QMD_RUNTIME_ARCHIVE
 #   LITELLM_PACKAGE_SPEC / AI_WORKSPACE_PREBUILT_COMPONENTS_REQUIRED
+#   OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC
+#     Optional OpenClaw plugin source for XWorkmate session/artifact methods.
+#   OPENCLAW_MULTI_SESSION_PLUGIN_DIR
+#     Optional local checkout used for macOS OpenClaw link install.
 #   AI_WORKSPACE_OFFLINE_MODE=auto (default) | force | off
 #   AI_WORKSPACE_OFFLINE_PACKAGE (local tarball/directory or URL)
 #   AI_WORKSPACE_OFFLINE_PACKAGE_URL (direct tarball URL)
@@ -57,6 +61,8 @@ XWORKSPACE_CORE_SKILLS_DIR=${XWORKSPACE_CORE_SKILLS_DIR:-"/tmp/xworkspace-core-s
 XWORKMATE_BRIDGE_REPO_URL=${XWORKMATE_BRIDGE_REPO_URL:-"https://github.com/ai-workspace-lab/xworkmate-bridge.git"}
 XWORKMATE_BRIDGE_BRANCH=${XWORKMATE_BRIDGE_BRANCH:-"release/v1.1.4"}
 XWORKMATE_BRIDGE_SOURCE_DIR=${XWORKMATE_BRIDGE_SOURCE_DIR:-"/tmp/xworkmate-bridge"}
+OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC=${OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC:-"github:x-evor/openclaw-multi-session-plugins#main"}
+OPENCLAW_MULTI_SESSION_PLUGIN_DIR=${OPENCLAW_MULTI_SESSION_PLUGIN_DIR:-"$SCRIPT_DIR/../../openclaw-multi-session-plugins"}
 AUTH_TOKEN_FILE=${AI_WORKSPACE_AUTH_TOKEN_FILE:-"$HOME/.ai_workspace_auth_token"}
 AI_WORKSPACE_LITELLM_PORT=${AI_WORKSPACE_LITELLM_PORT:-"4000"}
 AI_WORKSPACE_DEFAULT_MODEL=${AI_WORKSPACE_DEFAULT_MODEL:-"deepseek/deepseek-v4-flash"}
@@ -864,6 +870,32 @@ macos_openclaw_bin() {
     mkdir -p "$prefix"
     npm install --prefix "$prefix" openclaw@2026.6.1 @openclaw/codex@2026.6.1
     printf '%s/bin/openclaw\n' "$prefix"
+}
+
+ensure_macos_openclaw_multi_session_plugin() {
+    local openclaw_bin=$1
+    local package_spec=${OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC:-}
+    local plugin_dir=${OPENCLAW_MULTI_SESSION_PLUGIN_DIR:-}
+    local plugin_npm_dir="$HOME/.openclaw/npm"
+    if [ -n "$plugin_dir" ] && [ -d "$plugin_dir" ] && [ -f "$plugin_dir/openclaw.plugin.json" ]; then
+        info "Ensuring OpenClaw XWorkMate multi-session plugin is linked from ${plugin_dir} ..."
+        if [ -f "$plugin_dir/package.json" ] && [ -d "$plugin_dir/node_modules" ]; then
+            (cd "$plugin_dir" && npm run build --if-present)
+        fi
+        "$openclaw_bin" plugins install --link "$plugin_dir"
+        "$openclaw_bin" plugins enable openclaw-multi-session-plugins
+        "$openclaw_bin" plugins registry --refresh >/dev/null 2>&1 || true
+        return
+    fi
+    if [ -z "$package_spec" ]; then
+        return
+    fi
+    info "Ensuring OpenClaw XWorkMate multi-session plugin is installed from ${package_spec} ..."
+    mkdir -p "$plugin_npm_dir"
+    npm install --omit=dev --no-audit --no-fund --save-exact \
+        --prefix "$plugin_npm_dir" "$package_spec"
+    "$openclaw_bin" plugins enable openclaw-multi-session-plugins
+    "$openclaw_bin" plugins registry --refresh >/dev/null 2>&1 || true
 }
 
 macos_vault_bin() {
@@ -1902,6 +1934,7 @@ start_macos_target_services() {
     write_litellm_config "$litellm_config"
     litellm_bin="$litellm_venv/bin/litellm"
     openclaw_bin="$(macos_openclaw_bin)"
+    ensure_macos_openclaw_multi_session_plugin "$openclaw_bin"
     vault_bin="$(macos_vault_bin)"
     ttyd_bin="$(macos_ttyd_bin)"
     bridge_bin="$(macos_xworkmate_bridge_bin)"
@@ -1967,6 +2000,12 @@ if (!config.agents.defaults.models) config.agents.defaults.models = {};
 config.agents.defaults.models['litellm/$AI_WORKSPACE_DEFAULT_MODEL'] = { alias: 'Default Agent' };
 if (!config.agents.defaults.model) config.agents.defaults.model = {};
 config.agents.defaults.model.primary = 'litellm/$AI_WORKSPACE_DEFAULT_MODEL';
+if (!config.plugins) config.plugins = {};
+if (!config.plugins.entries) config.plugins.entries = {};
+config.plugins.entries['openclaw-multi-session-plugins'] = {
+  ...(config.plugins.entries['openclaw-multi-session-plugins'] || {}),
+  enabled: true
+};
 fs.mkdirSync(path.dirname(file), { recursive: true });
 fs.writeFileSync(file, JSON.stringify(config, null, 2));
 "
@@ -2421,6 +2460,7 @@ append_var "QMD_VERSION"                        "qmd_version"
 append_var "QMD_RUNTIME_ARCHIVE"                 "qmd_runtime_archive"
 append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
 append_var "LITELLM_VERSION"                    "litellm_version"
+append_var "OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC" "gateway_openclaw_multi_session_plugin_package_spec"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
 UNIFIED_AUTH_TOKEN="$(resolve_unified_auth_token)"
