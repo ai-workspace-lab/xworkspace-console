@@ -1953,7 +1953,7 @@ start_macos_target_services() {
     deploy_launch_agent \
         "plus.svc.xworkspace.litellm" \
         "$HOME" \
-        "exec /usr/bin/env PATH='$tool_path' DATABASE_URL='$litellm_database_url' LITELLM_MASTER_KEY=\"\$(cat '$config_dir/auth-token')\" LITELLM_SALT_KEY=\"\$(cat '$config_dir/auth-token')\" UI_USERNAME=admin UI_PASSWORD=\"\$(cat '$config_dir/auth-token')\" DEEPSEEK_API_KEY=\"\${DEEPSEEK_API_KEY:-}\" OPENAI_API_KEY=\"\${OPENAI_API_KEY:-}\" '$litellm_bin' --host 127.0.0.1 --port ${AI_WORKSPACE_LITELLM_PORT} --config '$litellm_config' --use_prisma_db_push" \
+        "exec /usr/bin/env PATH='$tool_path' DATABASE_URL='$litellm_database_url' LITELLM_MASTER_KEY=\"\$(cat '$config_dir/auth-token')\" LITELLM_SALT_KEY=\"\$(cat '$config_dir/auth-token')\" UI_USERNAME=admin UI_PASSWORD=\"\$(cat '$config_dir/auth-token')\" DEEPSEEK_API_KEY=\"\${DEEPSEEK_API_KEY:-}\" OPENAI_API_KEY=\"\${OPENAI_API_KEY:-}\" NVIDIA_API_KEY=\"\${NVIDIA_API_KEY:-}\" OLLAMA_API_KEY=\"\${OLLAMA_API_KEY:-}\" GEMINI_API_KEY=\"\${GEMINI_API_KEY:-}\" ANTHROPIC_API_KEY=\"\${ANTHROPIC_API_KEY:-}\" '$litellm_bin' --host 127.0.0.1 --port ${AI_WORKSPACE_LITELLM_PORT} --config '$litellm_config' --use_prisma_db_push" \
         "$state_dir/litellm.log" \
         "$state_dir/litellm.err.log"
     wait_for_url "http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/ui"
@@ -2136,6 +2136,12 @@ deploy_macos_local() {
     status_bad="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong-token" http://127.0.0.1:8788/portal/services)"
     [ "$status_ok" = "200" ] || error "Expected valid token to unlock portal services, got HTTP $status_ok"
     [ "$status_bad" = "401" ] || error "Expected invalid token to be rejected, got HTTP $status_bad"
+
+    if [ -n "${DEEPSEEK_API_KEY:-}" ] || [ -n "${NVIDIA_API_KEY:-}" ] || [ -n "${GEMINI_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${OLLAMA_API_KEY:-}" ]; then
+        info "API keys detected. Fetching and executing mainstream model registration script..."
+        curl -sfL "https://raw.githubusercontent.com/ai-workspace-lab/cloud-neutral-toolkit/main/playbooks/roles/vhosts/litellm/files/register_mainstream_models.sh" | \
+            LITELLM_TOKEN="$token" LITELLM_URL="http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}" bash -s || warn "Failed to register mainstream models."
+    fi
 
     success "AI Workspace Portal is running at http://127.0.0.1:17000/"
     info "Use the same xworkmate-bridge token to unlock the Portal."
@@ -2540,6 +2546,13 @@ append_var "QMD_RUNTIME_ARCHIVE"                 "qmd_runtime_archive"
 append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
 append_var "LITELLM_VERSION"                    "litellm_version"
 append_var "OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC" "gateway_openclaw_multi_session_plugin_package_spec"
+
+append_var "DEEPSEEK_API_KEY"                   "litellm_deepseek_api_key"
+append_var "NVIDIA_API_KEY"                     "litellm_nvidia_api_key"
+append_var "OLLAMA_API_KEY"                     "litellm_ollama_api_key"
+append_var "GEMINI_API_KEY"                     "litellm_gemini_api_key"
+append_var "OPENAI_API_KEY"                     "litellm_openai_api_key"
+append_var "ANTHROPIC_API_KEY"                  "litellm_anthropic_api_key"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
 UNIFIED_AUTH_TOKEN="$(resolve_unified_auth_token)"
