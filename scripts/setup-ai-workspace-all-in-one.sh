@@ -169,7 +169,7 @@ dynamic_parallel_job_limit() {
     fi
 
     load_average="$(one_minute_load_average)"
-    load_ceiling="$(awk -v load="$load_average" 'BEGIN { value=int(load); if (load > value) value++; print value }')"
+    load_ceiling="$(awk -v average="$load_average" 'BEGIN { value=int(average); if (average > value) value++; print value }')"
     dynamic_limit=$((hard_limit - load_ceiling))
     if [ "$dynamic_limit" -lt 1 ]; then
         dynamic_limit=1
@@ -711,6 +711,40 @@ validate_offline_package_target() {
     fi
 }
 
+validate_offline_package_requirements() {
+    local root=$1
+    local target=$2
+
+    case "$target" in
+        "ubuntu 26.04 "*)
+            if ! compgen -G "$root/packages/apt/npm_*.deb" >/dev/null; then
+                warn "Ubuntu 26.04 offline package is missing the required standalone npm package."
+                return 1
+            fi
+            ;;
+    esac
+}
+
+refresh_offline_package_repositories() {
+    local root=$1
+    local repo_dir branch
+
+    offline_mode_is_force && return
+    command -v git >/dev/null 2>&1 || return
+    curl -m 3 -sI https://github.com >/dev/null 2>&1 || return
+
+    for repo_dir in "$root/repos/xworkspace-console" "$root/repos/playbooks"; do
+        [ -d "$repo_dir/.git" ] || continue
+        branch="$(git -C "$repo_dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+        [ -n "$branch" ] || continue
+        info "Refreshing packaged $(basename "$repo_dir") checkout from origin/$branch..."
+        if ! git -C "$repo_dir" fetch origin "$branch" >/dev/null 2>&1 ||
+           ! git -C "$repo_dir" reset --hard "origin/$branch" >/dev/null 2>&1; then
+            warn "Unable to refresh packaged $(basename "$repo_dir") checkout; using bundled revision."
+        fi
+    done
+}
+
 run_offline_installer() {
     local root=$1
     local target=$2
@@ -718,11 +752,17 @@ run_offline_installer() {
     local env_args=(
         "AI_WORKSPACE_OFFLINE_ACTIVE=true"
         "AI_WORKSPACE_DEPLOYMENT_LOCK_HELD=true"
+        # The bundled repositories can retain the release builder's uid. Keep
+        # this exception scoped to the offline installer process and children.
+        "GIT_CONFIG_COUNT=1"
+        "GIT_CONFIG_KEY_0=safe.directory"
+        "GIT_CONFIG_VALUE_0=*"
     )
     local env_name
 
     [ -f "$installer" ] || return 1
     validate_offline_package_target "$root" "$target"
+    refresh_offline_package_repositories "$root"
     chmod +x "$installer"
 
     for env_name in \
@@ -746,6 +786,8 @@ run_offline_installer() {
         ANSIBLE_VAULT_PASSWORD \
         AI_WORKSPACE_AUTH_TOKEN_FILE \
         AI_WORKSPACE_VAULT_PASSWORD_FILE \
+        XWORKSPACE_CONSOLE_USER \
+        XWORKSPACE_CONSOLE_HOME \
         XWORKSPACE_CONSOLE_SOURCE_REPO \
         XWORKSPACE_CONSOLE_SOURCE_VERSION \
         AI_WORKSPACE_APT_LOCK_TIMEOUT; do
@@ -792,11 +834,50 @@ try_bootstrap_from_offline_package() {
         offline_fail_or_fallback "Unable to prepare offline package from $source."
         return 1
     }
+    if ! validate_offline_package_requirements "$root" "$target"; then
+        offline_fail_or_fallback "Offline package requirements are incomplete for this host."
+        return 1
+    fi
     if run_offline_installer "$root" "$target"; then
         return 0
     fi
 
     error "Offline package installer failed after making deployment changes; online fallback was not started."
+}
+
+linux_default_console_user() {
+    if [ -n "${XWORKSPACE_CONSOLE_USER:-}" ]; then
+        printf '%s\n' "$XWORKSPACE_CONSOLE_USER"
+    elif [ "$(id -u)" -eq 0 ]; then
+        printf 'ubuntu\n'
+    else
+        id -un
+    fi
+}
+
+linux_default_console_home() {
+    local user=$1
+    if [ -n "${XWORKSPACE_CONSOLE_HOME:-}" ]; then
+        printf '%s\n' "$XWORKSPACE_CONSOLE_HOME"
+    elif command -v getent >/dev/null 2>&1 && getent passwd "$user" >/dev/null 2>&1; then
+        getent passwd "$user" | cut -d: -f6
+    elif [ "$user" = "root" ]; then
+        printf '/root\n'
+    else
+        printf '/home/%s\n' "$user"
+    fi
+}
+
+append_linux_console_identity_vars() {
+    local console_user=$1
+    local console_home=$2
+
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_root=$console_home/.local/state/ai-workspace")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_config_dir=$console_home/.config/xworkspace")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_scripts_dir=$console_home/.local/state/ai-workspace/scripts")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$console_home/xworkspace-console")
 }
 
 resolve_unified_auth_token() {
@@ -1630,6 +1711,9 @@ if ! command -v ansible-playbook >/dev/null 2>&1 || ! command -v git >/dev/null 
     install_prerequisites "$OS_NAME"
 fi
 
+# Git may have been installed after the early best-effort configuration above.
+git config --global --add safe.directory '*' || true
+
 export XWORKSPACE_CONSOLE_PUBLIC_ACCESS="${XWORKSPACE_CONSOLE_PUBLIC_ACCESS:-false}"
 export XWORKMATE_BRIDGE_PUBLIC_ACCESS="${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}"
 export GATEWAY_OPENCLAW_PUBLIC_ACCESS="${GATEWAY_OPENCLAW_PUBLIC_ACCESS:-false}"
@@ -1897,6 +1981,11 @@ if [ "$(detect_os)" = "darwin" ]; then
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_home=$HOME")
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_compile_cache_dir=$HOME/.cache/openclaw-compile-cache")
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_path=$DARWIN_SERVICE_PATH")
+else
+    LINUX_CONSOLE_USER="$(linux_default_console_user)"
+    LINUX_CONSOLE_HOME="$(linux_default_console_home "$LINUX_CONSOLE_USER")"
+    info "Deploying AI Workspace runtime as $LINUX_CONSOLE_USER under $LINUX_CONSOLE_HOME..."
+    append_linux_console_identity_vars "$LINUX_CONSOLE_USER" "$LINUX_CONSOLE_HOME"
 fi
 
 # Export environment fallbacks for roles/scripts that read environment directly.
