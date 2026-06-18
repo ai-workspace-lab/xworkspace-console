@@ -261,8 +261,13 @@ resolve_required_package() {
 
 case "$(dpkg --print-architecture)" in
   amd64)
-    if ! apt-cache show "google-chrome-stable=${GOOGLE_CHROME_VERSION}" >/dev/null 2>&1; then
-      echo "Required Google Chrome version is unavailable: ${GOOGLE_CHROME_VERSION}" >&2
+    if apt-cache show "google-chrome-stable=${GOOGLE_CHROME_VERSION}" >/dev/null 2>&1; then
+      chrome_package="google-chrome-stable=${GOOGLE_CHROME_VERSION}"
+    elif apt-cache show google-chrome-stable >/dev/null 2>&1; then
+      echo "Required Google Chrome version is unavailable: ${GOOGLE_CHROME_VERSION}; using the repository candidate instead." >&2
+      chrome_package="google-chrome-stable"
+    else
+      echo "Required Google Chrome package is unavailable for this target." >&2
       exit 1
     fi
     ;;
@@ -310,7 +315,7 @@ for package in "${required_packages[@]}"; do
 done
 
 if [ "$(dpkg --print-architecture)" = "amd64" ]; then
-  packages+=("google-chrome-stable=${GOOGLE_CHROME_VERSION}")
+  packages+=("${chrome_package}")
 fi
 
 if apt-cache show docker-ce >/dev/null 2>&1; then
