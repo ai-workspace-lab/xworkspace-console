@@ -19,22 +19,49 @@ Image and video workflows fit naturally as custom tabs inside the same console s
 
 ## Start TLDR
 
+> **Note:** Currently supports **macOS**, **Debian**, and **Ubuntu**. Other systems are untested.
+
+### Installation
+
 1. Start the all-in-one installer:
 
 ```bash
 curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
 ```
 
-2. Or launch the local desktop console:
+2. Automatic model registration (via API Keys):
 
+Exporting keys before running the installer automatically registers models (e.g., DeepSeek, NVIDIA, OLLAMA/GLM) in the gateway:
 ```bash
-./scripts/setup-xworkspace-desktop.sh
+export DEEPSEEK_API_KEY="sk-..."
+export NVIDIA_API_KEY="nvapi-..."
+export OLLAMA_API_KEY="your-key-here"
+
+curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
 ```
 
-3. Open the console:
+### Uninstallation
+
+```bash
+# Standard uninstall (keeps configurations and states)
+curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -s -- uninstall
+
+# Purge (removes all data, keys, and configurations)
+curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -s -- uninstall --purge
+```
+
+### Usage
+
+1. Open the console via your browser:
 
 ```text
 http://127.0.0.1:17000
+```
+
+2. Or launch the local desktop console application:
+
+```bash
+./scripts/setup-xworkspace-desktop.sh
 ```
 
 ## Download

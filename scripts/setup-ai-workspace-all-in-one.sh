@@ -820,7 +820,7 @@ resolve_unified_auth_token() {
 
 require_or_install_macos_cmds() {
     local missing=()
-    for cmd in git node npm go curl lsof python3 ansible-playbook; do
+    for cmd in git node npm go curl lsof python3 ansible-playbook ttyd; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
         fi
@@ -840,6 +840,7 @@ require_or_install_macos_cmds() {
             python3) brew install python@3.13 ;;
             curl) brew install curl ;;
             ansible-playbook) brew install ansible ;;
+            ttyd) brew install ttyd ;;
             lsof) error "lsof is part of macOS; it is missing from PATH." ;;
         esac
     done
@@ -1490,7 +1491,7 @@ uninstall_ai_workspace() {
 
     info "Starting AI Workspace uninstallation..."
 
-    if [ "$(detect_os)" = "mac" ]; then
+    if [ "$(detect_os)" = "darwin" ]; then
         info "Stopping and removing macOS launch agents..."
         for svc in api console litellm openclaw vault ttyd bridge qmd hermes; do
             launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/plus.svc.xworkspace.$svc.plist" >/dev/null 2>&1 || true
@@ -1621,53 +1622,6 @@ if [ "${1:-}" = "sync" ]; then
 
     root="$(prepare_offline_package_root "$source" "$filename")" || error "Unable to prepare offline package from $source."
     success "Offline base package successfully synchronized and extracted to: $root"
-
-    # Helper for component packages
-    sync_component() {
-        local repo=$1
-        local file=$2
-        local extract_path=$3
-        local url
-        local tag
-        tag="$(github_api "/repos/${repo}/releases?per_page=100" | jq -r --arg name "${file}" '[ .[] | select(.draft == false) | select(any(.assets[]?; .name == $name)) | .tag_name ][0] // empty')"
-        if [ -z "$tag" ]; then
-            warn "Could not find release for $file in $repo"
-            return 1
-        fi
-        url="https://github.com/${repo}/releases/download/${tag}/${file}"
-        local cache_key
-        cache_key="$(printf '%s' "$url" | sha256_stream | cut -c1-16)"
-        local package="$AI_WORKSPACE_OFFLINE_WORK_DIR/${cache_key}-${file}"
-        local partial="${package}.part"
-        
-        if ! tar -tzf "$package" >/dev/null 2>&1; then
-            info "Downloading component package: $url"
-            if ! curl -fL --retry 3 --retry-delay 5 --continue-at - -o "$partial" "$url"; then
-                rm -f "$partial"
-                curl -fL --retry 3 --retry-delay 5 -o "$partial" "$url" || return 1
-            fi
-            mv "$partial" "$package"
-        else
-            info "Reusing cached component package: $package"
-        fi
-        
-        mkdir -p "$extract_path"
-        tar -xzf "$package" -C "$extract_path"
-        success "Component extracted to $extract_path"
-    }
-
-    # Extract target metadata for component filenames
-    # shellcheck disable=SC2086
-    set -- $target
-    distro=$1
-    version=$2
-    arch=$3
-
-    info "Starting synchronization for discrete component packages..."
-    sync_component "ai-workspace-services/litellm" "litellm-runtime-${distro}-${version}-${arch}.tar.gz" "${root}/repos/litellm" || warn "LiteLLM component sync failed."
-    sync_component "ai-workspace-services/qmd" "qmd-runtime-linux-${arch}.tar.gz" "${root}/repos/qmd" || warn "QMD component sync failed."
-    sync_component "ai-workspace-lab/xworkmate-bridge" "xworkmate-bridge-linux-${arch}.tar.gz" "${root}/repos/xworkmate-bridge" || warn "Xworkmate Bridge component sync failed."
-    sync_component "ai-workspace-lab/xworkspace-console" "xworkspace-console-runtime-linux-${arch}.tar.gz" "${root}/repos/xworkspace-console" || warn "XWorkspace Console component sync failed."
 
     success "Phase 1 complete. You can now run the script again without arguments to begin Phase 2 (deployment)."
     exit 0
@@ -1884,6 +1838,17 @@ append_secret_var "vault_root_token" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "vault_admin_password" "$UNIFIED_AUTH_TOKEN"
 ANSIBLE_EXTRA_VARS+=("-e" "vault_admin_init_enabled=true")
 ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_quality_gate_fail_on_error=false")
+
+if [ "$(detect_os)" = "darwin" ]; then
+    info "Disabling global privilege escalation for macOS..."
+    ANSIBLE_EXTRA_VARS+=("-e" "ansible_become=false")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_user=$(id -un)")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_home=$HOME")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_root=$HOME/.local/state/ai-workspace")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_config_dir=$HOME/.config/ai-workspace")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_scripts_dir=$HOME/xworkspace/scripts")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$HOME/xworkspace-console")
+fi
 
 # Export environment fallbacks for roles/scripts that read environment directly.
 export AI_WORKSPACE_AUTH_TOKEN="$UNIFIED_AUTH_TOKEN"
