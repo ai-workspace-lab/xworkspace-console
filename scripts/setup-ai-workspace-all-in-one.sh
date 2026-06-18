@@ -1110,6 +1110,73 @@ if updated != text:
 PY
 }
 
+# On macOS the vault role's "Ensure standalone Vault directories exist" task
+# targets /etc/vault.d and /opt/vault/data with owner: root. Those paths are not
+# writable under become=false and are non-standard for macOS, so patch the
+# cloned role to: (1) skip that root-owned directory task on Darwin, (2) point
+# the vault dirs/binary at Apple-standard, user-writable locations, and (3)
+# create the data dir (user-owned) in the macОS task path. Linux is untouched.
+patch_playbook_vault_macos() {
+    local vars_file="roles/vhosts/vault/vars/main.yml"
+    local tasks_file="roles/vhosts/vault/tasks/main.yml"
+    local macos_file="roles/vhosts/vault/tasks/macos.yml"
+    [ -f "$vars_file" ] && [ -f "$tasks_file" ] && [ -f "$macos_file" ] || return 0
+    python3 - <<'PY'
+from pathlib import Path
+
+vars_path = Path("roles/vhosts/vault/vars/main.yml")
+tasks_path = Path("roles/vhosts/vault/tasks/main.yml")
+macos_path = Path("roles/vhosts/vault/tasks/macos.yml")
+
+# 1) Make vault dirs and binary path OS-conditional (Linux unchanged).
+vars_text = vars_path.read_text()
+vars_subs = {
+    "vault_binary_path: /usr/local/bin/vault":
+        "vault_binary_path: \"{{ '/opt/homebrew/bin/vault' if ansible_os_family == 'Darwin' else '/usr/local/bin/vault' }}\"",
+    "vault_config_dir: /etc/vault.d":
+        "vault_config_dir: \"{{ (ansible_env.HOME ~ '/Library/Application Support/vault') if ansible_os_family == 'Darwin' else '/etc/vault.d' }}\"",
+    "vault_data_dir: /opt/vault/data":
+        "vault_data_dir: \"{{ (ansible_env.HOME ~ '/Library/Application Support/vault/data') if ansible_os_family == 'Darwin' else '/opt/vault/data' }}\"",
+}
+for old, new in vars_subs.items():
+    if old in vars_text:
+        vars_text = vars_text.replace(old, new)
+vars_path.write_text(vars_text)
+
+# 2) Skip the root-owned directory creation task on macOS.
+tasks_text = tasks_path.read_text()
+dir_when_old = (
+    '  loop:\n'
+    '    - "{{ vault_config_dir }}"\n'
+    '    - "{{ vault_data_dir }}"\n'
+    '  when:\n'
+    '    - vault_deploy_mode == "standalone"\n'
+)
+dir_when_new = dir_when_old + "    - ansible_os_family != 'Darwin'\n"
+if dir_when_old in tasks_text and "    - ansible_os_family != 'Darwin'\n\n- name: Deploy standalone Vault systemd" not in tasks_text:
+    tasks_text = tasks_text.replace(dir_when_old, dir_when_new, 1)
+tasks_path.write_text(tasks_text)
+
+# 3) Create the macOS vault dirs (user-owned) before the launchd plist is laid down.
+macos_text = macos_path.read_text()
+dir_task = (
+    "- name: Ensure macOS Vault directories exist\n"
+    "  ansible.builtin.file:\n"
+    "    path: \"{{ item }}\"\n"
+    "    state: directory\n"
+    "    mode: \"0755\"\n"
+    "  loop:\n"
+    "    - \"{{ vault_config_dir }}\"\n"
+    "    - \"{{ vault_data_dir }}\"\n"
+    "    - \"{{ ansible_env.HOME }}/.local/state/xworkspace\"\n\n"
+)
+anchor = "- name: Install HashiCorp Tap\n"
+if "Ensure macOS Vault directories exist" not in macos_text and anchor in macos_text:
+    macos_text = macos_text.replace(anchor, dir_task + anchor, 1)
+macos_path.write_text(macos_text)
+PY
+}
+
 ensure_core_skills_source() {
     if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
        [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
@@ -1889,6 +1956,9 @@ else
 fi
 
 patch_playbook_user_systemd
+if [ "$(detect_os)" = "darwin" ]; then
+    patch_playbook_vault_macos
+fi
 prefetch_independent_sources
 ensure_core_skills_source
 ensure_xworkmate_bridge_source

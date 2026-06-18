@@ -107,6 +107,16 @@
 | **修复方案** | 双层：①`setup-ai-workspace-all-in-one.sh` 的 Darwin 分支注入 `-e xworkmate_bridge_base_dir="$HOME/Library/Application Support/cloud-neutral/xworkmate-bridge"`（`curl \| bash` 拉取的是本仓库脚本，playbooks 来自独立仓库，故脚本侧 `-e` 是该路径下唯一可生效的修复点）；②role `defaults/main.yml` 将默认值改为按 `ansible_os_family` 的三元表达式，使离线/本地 playbook 路径亦正确 |
 | **生效前提** | `curl \| bash` 从 GitHub `main` 拉取脚本，修复必须先 push 到 `ai-workspace-lab/xworkspace-console` 的 `main`；否则远端仍是旧脚本（extra-vars 优先级最高，若 `-e` 已执行则绝不会回落到 `/opt`，由此可判定执行的是未修复的远端脚本） |
 
+## TC-MAC-013: Vault standalone 目录写入系统路径被拒
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/vault/tasks/main.yml`、`roles/vhosts/vault/vars/main.yml`、`roles/vhosts/vault/tasks/macos.yml` |
+| **触发报错** | `TASK [roles/vhosts/vault/ : Ensure standalone Vault directories exist]` → `[Errno 13] Permission denied: b'/etc/vault.d'`、`b'/opt/vault'` |
+| **根因** | “Ensure standalone Vault directories exist” 任务以 `owner: root` 创建 `/etc/vault.d` 与 `/opt/vault/data`，且**缺失** vault 角色其余 standalone 任务都带的 `ansible_os_family != 'Darwin'` 守卫。macOS 以 `become=false` 运行，既无权写 `/etc`、`/opt`，`owner: root` 的 chown 也无法完成。与 bridge 不同（其目录 owner 为服务用户，可由 `-e` 修复），该任务的 `owner: root` 为硬编码，无法用 extra-vars 覆盖，必须改 role 逻辑 |
+| **目录策略** | Linux 保持 `/etc/vault.d`、`/opt/vault/data`；macOS 改用 Apple 标准 `~/Library/Application Support/vault`、`~/Library/Application Support/vault/data`；二进制路径 macOS 取 `/opt/homebrew/bin/vault`（brew 安装位置），免去需 sudo 的 `/usr/local/bin` 软链依赖 |
+| **修复方案** | role 位于独立 playbooks 仓库，无法从本仓库直接提交；沿用脚本既有的“克隆后打补丁”机制（参见 `patch_playbook_user_systemd`），在 `setup-ai-workspace-all-in-one.sh` 新增 `patch_playbook_vault_macos()`，仅在 Darwin 下对克隆出的 vault 角色：①给目录创建任务追加 `ansible_os_family != 'Darwin'` 守卫；②把 `vault_config_dir`/`vault_data_dir`/`vault_binary_path` 改为按 OS 的三元表达式；③在 `macos.yml` 前置创建用户属主的数据目录（含 launchd 日志目录 `~/.local/state/xworkspace`）。该补丁对 `curl \| bash` 与本地执行两条路径均生效，幂等，且不改动 Linux 行为 |
+
 ---
 
 ## 修复维度总结
@@ -116,7 +126,8 @@
 | 组件获取方式替换 (brew vs binary) | TC-001 |
 | 权限收缩 (become: false) | TC-002, TC-006, TC-007, TC-008, TC-009 |
 | 用户组适配 (staff vs ubuntu) | TC-003, TC-010 |
-| 目录路径降级 ($HOME vs /home/ubuntu, /opt) | TC-004, TC-006, TC-009, TC-010, TC-012 |
+| 目录路径降级 ($HOME vs /home/ubuntu, /opt, /etc) | TC-004, TC-006, TC-009, TC-010, TC-012, TC-013 |
+| 克隆后补丁注入 (post-clone patch) | TC-013 |
 | 包管理器绕过 (skip apt on Darwin) | TC-008, TC-010 |
 | 模板变量解耦 (remove nvm/nodejs_version) | TC-005 |
 | 路径空格兼容 (argv vs string) | TC-011 |
