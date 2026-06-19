@@ -1193,6 +1193,58 @@ boot_new = (
 if boot_old in tasks_text and boot_new not in tasks_text:
     tasks_text = tasks_text.replace(boot_old, boot_new, 1)
 
+# 2c) DIAGNOSTIC (macOS): bootstrap runs under no_log; capture rc/stdout/stderr
+# and write them to a readable file so the real init_vault_admin.sh error can be
+# inspected. (Temporary; remove once green.)
+diag_anchor = (
+    "  no_log: true\n"
+    "  when:\n"
+    "    - not ansible_check_mode\n"
+)
+diag_new = (
+    "  no_log: false\n"
+    "  register: vault_admin_bootstrap_result\n"
+    "  failed_when: false\n"
+    "  when:\n"
+    "    - not ansible_check_mode\n"
+)
+if diag_anchor in tasks_text and "vault_admin_bootstrap_result" not in tasks_text:
+    tasks_text = tasks_text.replace(diag_anchor, diag_new, 1)
+diag_tasks = (
+    "\n- name: Show Vault admin bootstrap diagnostics (macOS)\n"
+    "  ansible.builtin.debug:\n"
+    "    msg:\n"
+    "      - \"rc={{ vault_admin_bootstrap_result.rc | default('n/a') }}\"\n"
+    "      - \"stdout={{ vault_admin_bootstrap_result.stdout_lines | default([]) }}\"\n"
+    "      - \"stderr={{ vault_admin_bootstrap_result.stderr_lines | default([]) }}\"\n"
+    "  when:\n"
+    "    - ansible_os_family == 'Darwin'\n"
+    "    - vault_admin_bootstrap_result is defined\n"
+    "\n- name: Write Vault bootstrap diagnostics to file (macOS)\n"
+    "  ansible.builtin.copy:\n"
+    "    dest: \"/Users/shenlan/workspaces/cloud-neutral-toolkit/vault-bootstrap-debug.log\"\n"
+    "    content: |\n"
+    "      rc={{ vault_admin_bootstrap_result.rc | default('n/a') }}\n"
+    "      ===== STDOUT =====\n"
+    "      {{ vault_admin_bootstrap_result.stdout | default('') }}\n"
+    "      ===== STDERR =====\n"
+    "      {{ vault_admin_bootstrap_result.stderr | default('') }}\n"
+    "  when:\n"
+    "    - ansible_os_family == 'Darwin'\n"
+    "    - vault_admin_bootstrap_result is defined\n"
+    "  ignore_errors: true\n"
+    "\n- name: Fail when Vault admin bootstrap failed (macOS)\n"
+    "  ansible.builtin.assert:\n"
+    "    that:\n"
+    "      - (vault_admin_bootstrap_result.rc | default(1)) == 0\n"
+    "    fail_msg: \"vault admin bootstrap failed; see vault-bootstrap-debug.log\"\n"
+    "  when:\n"
+    "    - ansible_os_family == 'Darwin'\n"
+    "    - vault_admin_bootstrap_result is defined\n"
+)
+if "Show Vault admin bootstrap diagnostics (macOS)" not in tasks_text:
+    tasks_text = tasks_text.rstrip("\n") + "\n" + diag_tasks
+
 tasks_path.write_text(tasks_text)
 
 # 2d) init_vault_admin.sh resolves the admin entity_id by logging in as the
@@ -1209,6 +1261,9 @@ if init_path.exists():
     )
     login_new = (
         'entity_id=""\n'
+        '# bootstrap_token kept defined (empty) so any later "vault token revoke\n'
+        '# $bootstrap_token" line stays valid under set -u; we no longer log in.\n'
+        'bootstrap_token=""\n'
         'for alias_id in $(vault list -format=json identity/entity-alias/id 2>/dev/null | jq -r \'.[]?\'); do\n'
         '  alias_json="$(vault read -format=json "identity/entity-alias/id/${alias_id}" 2>/dev/null || true)"\n'
         '  alias_name="$(printf \'%s\' "$alias_json" | jq -r \'.data.name // empty\')"\n'
@@ -1226,10 +1281,11 @@ if init_path.exists():
     )
     if login_old in init_text:
         init_text = init_text.replace(login_old, login_new, 1)
-    init_text = init_text.replace(
-        'vault token revoke "$bootstrap_token" >/dev/null || true\n', '', 1
-    )
-    init_path.write_text(init_text)
+        # Note: we intentionally do NOT delete the later "vault token revoke
+        # $bootstrap_token" line — on some revisions it is wrapped in an if/fi,
+        # and removing it would leave an empty then-block (syntax error). With
+        # bootstrap_token="" set above, the revoke is a harmless no-op.
+        init_path.write_text(init_text)
 
 # 3) Create the macOS vault dirs (user-owned) before the launchd plist is laid down.
 macos_text = macos_path.read_text()
