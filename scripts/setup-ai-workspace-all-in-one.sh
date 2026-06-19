@@ -1519,7 +1519,12 @@ prefetch_git_repository() {
         git clone --no-checkout "$repo" "$dest"
         git -C "$dest" fetch --force origin "$ref"
     fi
-    git -C "$dest" checkout --force --detach FETCH_HEAD
+    # Point a local branch at the fetched commit instead of leaving a detached
+    # HEAD. The prefetch dir is later consumed via `git clone file://<dest>`,
+    # which only transfers objects reachable from branches/tags (a detached HEAD
+    # or remote-tracking ref is not enough) — otherwise the downstream checkout
+    # of this exact commit fails with "fatal: unable to read tree <sha>".
+    git -C "$dest" checkout --force -B ai-workspace-prefetched FETCH_HEAD
     git -C "$dest" clean -ffd
     printf '%s\n' "$(git -C "$dest" rev-parse HEAD)" > "$dest/.ai-workspace-prefetched-commit"
     info "Prefetched $label at $(cat "$dest/.ai-workspace-prefetched-commit")"
