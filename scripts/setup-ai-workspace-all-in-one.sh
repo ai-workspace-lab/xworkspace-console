@@ -725,11 +725,31 @@ validate_offline_package_requirements() {
     esac
 }
 
+ensure_git_for_offline_refresh() {
+    local target=$1
+
+    command -v git >/dev/null 2>&1 && return
+
+    case "$target" in
+        "ubuntu "*|"debian "*)
+            info "Installing Git before refreshing packaged repositories..."
+            wait_for_apt_locks
+            run_as_root apt-get update -y
+            run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y git
+            ;;
+        *)
+            return
+            ;;
+    esac
+}
+
 refresh_offline_package_repositories() {
     local root=$1
+    local target=${2:-}
     local repo_dir branch
 
     offline_mode_is_force && return
+    ensure_git_for_offline_refresh "$target"
     command -v git >/dev/null 2>&1 || return
     curl -m 3 -sI https://github.com >/dev/null 2>&1 || return
 
@@ -762,7 +782,7 @@ run_offline_installer() {
 
     [ -f "$installer" ] || return 1
     validate_offline_package_target "$root" "$target"
-    refresh_offline_package_repositories "$root"
+    refresh_offline_package_repositories "$root" "$target"
     chmod +x "$installer"
 
     for env_name in \

@@ -100,6 +100,26 @@ test_auto_offline_mode_refreshes_packaged_repositories() (
     rm -rf "$package_root" "$git_log"
 )
 
+test_offline_refresh_installs_git_on_fresh_debian() (
+    install_log="$(mktemp)"
+    # shellcheck disable=SC2329
+    command() {
+        if [ "${1:-}" = "-v" ] && [ "${2:-}" = "git" ]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+    # shellcheck disable=SC2329
+    wait_for_apt_locks() { :; }
+    # shellcheck disable=SC2329
+    run_as_root() { printf '%s\n' "$*" >> "$install_log"; }
+
+    ensure_git_for_offline_refresh "debian 13 amd64"
+    grep -q '^apt-get update -y$' "$install_log" || fail "fresh Debian did not refresh apt metadata"
+    grep -q '^env DEBIAN_FRONTEND=noninteractive apt-get install -y git$' "$install_log" || fail "fresh Debian did not install Git"
+    rm -f "$install_log"
+)
+
 test_ubuntu_2604_offline_package_requires_npm() (
     package_root="$(mktemp -d)"
     mkdir -p "$package_root/packages/apt"
@@ -212,6 +232,8 @@ test_forced_offline_mode_does_not_refresh_repositories
 printf 'ok - forced offline mode does not refresh packaged repositories\n'
 test_auto_offline_mode_refreshes_packaged_repositories
 printf 'ok - auto offline mode refreshes packaged repositories\n'
+test_offline_refresh_installs_git_on_fresh_debian
+printf 'ok - fresh Debian installs Git before repository refresh\n'
 test_ubuntu_2604_offline_package_requires_npm
 printf 'ok - Ubuntu 26.04 offline package requires npm\n'
 test_dynamic_parallel_limit_avoids_awk_reserved_names
