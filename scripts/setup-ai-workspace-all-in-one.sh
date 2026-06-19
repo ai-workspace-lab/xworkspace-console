@@ -1450,6 +1450,31 @@ for o, n in owner_subs:
         text = text.replace(o, n, 1)
 
 path.write_text(text)
+
+# provision-database.yml runs psql with become_user postgres, which has no
+# equivalent on macOS Homebrew (no postgres system user, no passwordless sudo,
+# psql off-PATH). On Darwin run without escalation as the current user (the brew
+# DB superuser) and put the postgresql@16 bin on PATH. Linux unchanged.
+prov_path = Path("roles/vhosts/litellm/tasks/provision-database.yml")
+if prov_path.exists():
+    prov = prov_path.read_text()
+    prov_old = (
+        "  args:\n"
+        "    executable: /bin/bash\n"
+        "  become: true\n"
+        "  become_user: \"{{ 'root' if litellm_database_provisioner == 'docker' else 'postgres' }}\"\n"
+    )
+    prov_new = (
+        "  args:\n"
+        "    executable: /bin/bash\n"
+        "  environment:\n"
+        "    PATH: \"/opt/homebrew/opt/postgresql@16/bin:/usr/local/opt/postgresql@16/bin:{{ ansible_env.PATH }}\"\n"
+        "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
+        "  become_user: \"{{ 'root' if litellm_database_provisioner == 'docker' else 'postgres' }}\"\n"
+    )
+    if prov_old in prov:
+        prov = prov.replace(prov_old, prov_new)
+        prov_path.write_text(prov)
 PY
 }
 
