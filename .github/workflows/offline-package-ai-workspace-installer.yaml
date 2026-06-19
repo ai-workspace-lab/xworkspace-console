@@ -248,28 +248,67 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
+
+          # GitHub release assets are hard-capped at 2 GiB. Packages at/over the
+          # limit are split into <2 GiB parts plus a ".parts" manifest; the
+          # offline bootstrap reassembles them. Parts are 1900 MiB.
+          GH_ASSET_LIMIT=2147483648
+          SPLIT_SIZE=1900m
+
+          delete_asset_if_present() {
+            local name=$1
+            if gh release view "$TAG_NAME" --json assets --jq '.assets[].name' \
+                 2>/dev/null | grep -Fxq "$name"; then
+              echo "Deleting existing release asset ${name}"
+              gh release delete-asset "$TAG_NAME" "$name" --yes
+            fi
+          }
+
+          upload_one() {
+            local file=$1 name attempt
+            name="$(basename "$file")"
+            delete_asset_if_present "$name"
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG_NAME" "$file" --clobber; then
+                return 0
+              fi
+              if [[ "$attempt" -eq 3 ]]; then
+                echo "Failed to upload ${file} after ${attempt} attempts" >&2
+                return 1
+              fi
+              sleep $((attempt * 20))
+            done
+          }
+
           packages=(release-artifacts/*.tar.gz)
           if [[ ${#packages[@]} -eq 0 ]]; then
             echo "No offline packages found in release-artifacts" >&2
             exit 1
           fi
+
           for package in "${packages[@]}"; do
-            echo "Uploading ${package}"
             asset_name="$(basename "$package")"
-            if gh release view "$TAG_NAME" --json assets --jq '.assets[].name' | grep -Fxq "$asset_name"; then
-              echo "Deleting existing release asset ${asset_name} before upload"
-              gh release delete-asset "$TAG_NAME" "$asset_name" --yes
+            size="$(stat -c%s "$package")"
+            if [[ "$size" -lt "$GH_ASSET_LIMIT" ]]; then
+              echo "Uploading ${asset_name} (${size} bytes)"
+              upload_one "$package"
+            else
+              echo "Splitting oversized ${asset_name} (${size} bytes) into ${SPLIT_SIZE} parts"
+              dir="$(dirname "$package")"
+              (
+                cd "$dir"
+                rm -f "${asset_name}".part-* "${asset_name}.parts"
+                split -b "$SPLIT_SIZE" -d -a 3 "$asset_name" "${asset_name}.part-"
+                ls "${asset_name}".part-* | LC_ALL=C sort > "${asset_name}.parts"
+              )
+              # Remove any stale whole asset, then publish the manifest + parts.
+              delete_asset_if_present "$asset_name"
+              upload_one "${dir}/${asset_name}.parts"
+              for part in "${dir}/${asset_name}".part-*; do
+                echo "Uploading $(basename "$part")"
+                upload_one "$part"
+              done
             fi
-            for attempt in 1 2 3; do
-              if gh release upload "$TAG_NAME" "$package" --clobber; then
-                break
-              fi
-              if [[ "$attempt" -eq 3 ]]; then
-                echo "Failed to upload ${package} after ${attempt} attempts" >&2
-                exit 1
-              fi
-              sleep $((attempt * 20))
-            done
           done
 
       - name: Rsync packages to remote mirror

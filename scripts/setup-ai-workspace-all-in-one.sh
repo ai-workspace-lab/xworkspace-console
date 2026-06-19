@@ -622,6 +622,32 @@ validate_offline_archive() {
     return 1
 }
 
+download_offline_split() {
+    # Reassemble an offline package that was published as <2 GiB parts because it
+    # exceeded GitHub's 2 GiB asset cap. "$source" is the would-be single-file
+    # URL; the parts manifest lives at "${source}.parts" and lists the part asset
+    # names (one per line), which sit next to it in the same release.
+    local source=$1
+    local partial=$2
+    local base manifest part part_url
+    base="${source%/*}"
+    manifest="${partial}.parts"
+    curl -fL --retry 3 --retry-delay 5 -o "$manifest" "${source}.parts" 2>/dev/null || return 1
+    : > "$partial"
+    while IFS= read -r part; do
+        part="${part%$'\r'}"
+        [ -n "$part" ] || continue
+        part_url="${base}/${part}"
+        info "Downloading AI Workspace offline package part: ${part}"
+        if ! curl -fL --retry 3 --retry-delay 5 "$part_url" >> "$partial"; then
+            rm -f "$manifest"
+            return 1
+        fi
+    done < "$manifest"
+    rm -f "$manifest"
+    return 0
+}
+
 prepare_offline_package_root() {
     local source=$1
     local filename=$2
@@ -640,9 +666,12 @@ prepare_offline_package_root() {
                 info "Reusing cached AI Workspace offline package: $package"
             else
                 info "Downloading AI Workspace offline package: $resolved_source"
-                if ! curl -fL --retry 3 --retry-delay 5 --continue-at - -o "$partial" "$resolved_source"; then
+                if ! curl -fL --retry 3 --retry-delay 5 --continue-at - -o "$partial" "$resolved_source" 2>/dev/null \
+                   && ! curl -fL --retry 3 --retry-delay 5 -o "$partial" "$resolved_source" 2>/dev/null; then
+                    # The single asset may have been split into <2 GiB parts.
                     rm -f "$partial"
-                    curl -fL --retry 3 --retry-delay 5 -o "$partial" "$resolved_source" || return 1
+                    info "Single offline asset unavailable; trying split parts..."
+                    download_offline_split "$source" "$partial" || return 1
                 fi
                 validate_offline_archive "$partial" || return 1
                 mv "$partial" "$package"

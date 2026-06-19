@@ -93,14 +93,90 @@ jobs:
             dist/assets/SHA256SUMS-*
           if-no-files-found: error
 
+  build-darwin:
+    name: Build darwin-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: amd64
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: api/go.mod
+          cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Build target runtime
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          root="dist/runtime/xworkspace-console"
+          mkdir -p "${root}/dashboard" "${root}/bin" "dist/assets"
+
+          cp -a scripts "${root}/"
+          cp dashboard/package.json dashboard/package-lock.json dashboard/index.html \
+            dashboard/tsconfig.json dashboard/vite.config.ts "${root}/dashboard/"
+          cp -a dashboard/src "${root}/dashboard/"
+
+          # Native macOS build: npm + go run on the matching arch runner so the
+          # dashboard node_modules and the API binary are genuinely darwin/${TARGET_ARCH}.
+          (
+            cd dashboard
+            npm ci --no-audit --no-fund
+            npm run build
+          )
+          cp -a dashboard/dist dashboard/node_modules "${root}/dashboard/"
+
+          (
+            cd api
+            CGO_ENABLED=0 GOOS=darwin GOARCH="${TARGET_ARCH}" \
+              go build -buildvcs=false -trimpath -o "../${root}/bin/xworkspace-api" .
+          )
+
+          cat > "${root}/manifest.json" <<JSON
+          {
+            "component": "xworkspace-console",
+            "commit": "${GITHUB_SHA}",
+            "os": "darwin",
+            "arch": "${TARGET_ARCH}",
+            "apiBinary": "bin/xworkspace-api",
+            "dashboard": "dashboard"
+          }
+          JSON
+          tar -czf "dist/assets/xworkspace-console-runtime-darwin-${TARGET_ARCH}.tar.gz" \
+            -C "dist/runtime" xworkspace-console
+          (
+            cd dist/assets
+            shasum -a 256 -- ./*.tar.gz | sed 's# \./# #' > "SHA256SUMS-darwin-${TARGET_ARCH}"
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xworkspace-console-runtime-darwin-${{ matrix.arch }}
+          path: |
+            dist/assets/*.tar.gz
+            dist/assets/SHA256SUMS-*
+          if-no-files-found: error
+
   publish:
     name: Publish runtime release
-    needs: build
+    needs: [build, build-darwin]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: xworkspace-console-runtime-linux-*
+          pattern: xworkspace-console-runtime-*
           path: dist
           merge-multiple: true
 
