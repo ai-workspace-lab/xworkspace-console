@@ -2309,6 +2309,12 @@ if [ "$(detect_os)" = "darwin" ]; then
     # /root/.ai_workspace_postgres_password lookup is never attempted.
     ANSIBLE_EXTRA_VARS+=("-e" "postgresql_deploy_mode=native")
     append_secret_var "postgresql_admin_password" "$UNIFIED_AUTH_TOKEN"
+    # LiteLLM persists its salt key and DB password under /root by default, which
+    # is unreadable/unwritable on macOS, so the "Materialize persisted LiteLLM
+    # secrets" assert sees empty values. Source them from the shared token, like
+    # the other services on macOS.
+    append_secret_var "litellm_salt_key" "$UNIFIED_AUTH_TOKEN"
+    append_secret_var "litellm_database_password" "$UNIFIED_AUTH_TOKEN"
 else
     LINUX_CONSOLE_USER="$(linux_default_console_user)"
     LINUX_CONSOLE_HOME="$(linux_default_console_home "$LINUX_CONSOLE_USER")"
