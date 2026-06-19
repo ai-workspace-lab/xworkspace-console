@@ -167,6 +167,16 @@
 | **修复方案** | 与 vault/openclaw 对齐：改用 `ansible.builtin.command: brew install postgresql@16`，并在 `environment.PATH` 前置 `/opt/homebrew/bin:/usr/local/bin`（优先选可用的 brew），加 `HOMEBREW_NO_AUTO_UPDATE=1`；`register`+`changed_when`/`failed_when` 维持幂等。真实仓库 `macos.yml` 已改；clone 路径由 `patch_playbook_postgres_macos()` 同步补丁 |
 | **备注** | 若该机仅有一个且过期的 brew（纯 Intel），根因为环境，需 `brew update`/重装 Homebrew；本修复在“存在可用 brew”时即可绕过（vault 步骤已证明存在可用 brew） |
 
+## TC-MAC-019: litellm 同样误用 Homebrew 模块崩溃
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/litellm/tasks/main.yml` |
+| **触发报错** | `Install LiteLLM prerequisites (macOS)` → `/usr/local/Homebrew/.../macos_version.rb: unknown or unsupported macOS version: "27.0"` |
+| **根因** | 与 TC-MAC-018 同源：`community.general.homebrew` 模块命中过期 Intel Homebrew 崩溃 |
+| **修复方案** | 改 `ansible.builtin.command: brew install python@3.13` + `environment.PATH` 前置 `/opt/homebrew/bin:/usr/local/bin` + `HOMEBREW_NO_AUTO_UPDATE=1`。真实仓库已改；clone 路径由 `patch_playbook_litellm_macos()` 同步补丁 |
+| **备注** | litellm 后续仍有 macOS 缺口待逐个处理：`/root` 派生的 salt/db 密钥 assert、`/etc/litellm` 配置目录、`become: true` + `become_user` 的 pip/prisma 任务（服务用户在 macOS 未创建）、DB provisioning 等 |
+
 ---
 
 ## 修复维度总结

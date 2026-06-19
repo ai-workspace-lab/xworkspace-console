@@ -1383,6 +1383,43 @@ if old in text:
 PY
 }
 
+# litellm installs python@3.13 via the community.general.homebrew module on
+# macOS, which has the same stale-Intel-Homebrew crash risk. Replace it with a
+# brew command using the PATH brew (Apple Silicon prefix first).
+patch_playbook_litellm_macos() {
+    local main_file="roles/vhosts/litellm/tasks/main.yml"
+    [ -f "$main_file" ] || return 0
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("roles/vhosts/litellm/tasks/main.yml")
+text = path.read_text()
+old = (
+    "- name: Install LiteLLM prerequisites (macOS)\n"
+    "  community.general.homebrew:\n"
+    "    name: python@3.13\n"
+    "    state: present\n"
+    "  when: ansible_os_family == 'Darwin'\n"
+)
+new = (
+    "- name: Install LiteLLM prerequisites (macOS)\n"
+    "  ansible.builtin.command: brew install python@3.13\n"
+    "  environment:\n"
+    "    PATH: \"/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}\"\n"
+    "    HOMEBREW_NO_AUTO_UPDATE: \"1\"\n"
+    "  register: litellm_brew_python\n"
+    "  changed_when: >-\n"
+    "    'already installed' not in (litellm_brew_python.stderr | default(''))\n"
+    "    and 'already installed' not in (litellm_brew_python.stdout | default(''))\n"
+    "  failed_when: litellm_brew_python.rc != 0\n"
+    "  when: ansible_os_family == 'Darwin'\n"
+)
+if old in text:
+    text = text.replace(old, new, 1)
+    path.write_text(text)
+PY
+}
+
 ensure_core_skills_source() {
     if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
        [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
@@ -2166,6 +2203,7 @@ if [ "$(detect_os)" = "darwin" ]; then
     patch_playbook_vault_macos
     patch_playbook_common_macos
     patch_playbook_postgres_macos
+    patch_playbook_litellm_macos
 fi
 prefetch_independent_sources
 ensure_core_skills_source
