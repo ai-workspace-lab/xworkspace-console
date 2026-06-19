@@ -1416,7 +1416,40 @@ new = (
 )
 if old in text:
     text = text.replace(old, new, 1)
-    path.write_text(text)
+
+# The config dir and env-file tasks hardcode owner/group root, which cannot be
+# chowned under become=false on macOS. Make ownership OS-conditional (service
+# user/group on Darwin, root on Linux). The config dir path itself is relocated
+# to a user-writable location via the litellm_config_dir extra-var.
+owner_subs = [
+    (
+        '    path: "{{ litellm_config_dir }}"\n'
+        '    state: directory\n'
+        '    owner: root\n'
+        '    group: root\n'
+        '    mode: "0755"\n',
+        '    path: "{{ litellm_config_dir }}"\n'
+        '    state: directory\n'
+        '    owner: "{{ litellm_service_user if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+        '    group: "{{ litellm_service_group if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+        '    mode: "0755"\n',
+    ),
+    (
+        '    dest: "{{ litellm_env_file }}"\n'
+        '    owner: root\n'
+        '    group: root\n'
+        '    mode: "0600"\n',
+        '    dest: "{{ litellm_env_file }}"\n'
+        '    owner: "{{ litellm_service_user if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+        '    group: "{{ litellm_service_group if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+        '    mode: "0600"\n',
+    ),
+]
+for o, n in owner_subs:
+    if o in text:
+        text = text.replace(o, n, 1)
+
+path.write_text(text)
 PY
 }
 
@@ -2315,6 +2348,9 @@ if [ "$(detect_os)" = "darwin" ]; then
     # the other services on macOS.
     append_secret_var "litellm_salt_key" "$UNIFIED_AUTH_TOKEN"
     append_secret_var "litellm_database_password" "$UNIFIED_AUTH_TOKEN"
+    # litellm_config_dir defaults to /etc/litellm (root-owned). Relocate to a
+    # user-writable path on macOS; config.yaml/litellm.env derive from it.
+    ANSIBLE_EXTRA_VARS+=("-e" "litellm_config_dir=$HOME/.config/litellm")
 else
     LINUX_CONSOLE_USER="$(linux_default_console_user)"
     LINUX_CONSOLE_HOME="$(linux_default_console_home "$LINUX_CONSOLE_USER")"
