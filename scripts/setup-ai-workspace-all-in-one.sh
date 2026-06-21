@@ -1780,7 +1780,7 @@ if path.exists():
         "    group: \"{{ gateway_openclaw_service_group }}\"\n"
         "    mode: \"0755\"\n"
         "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
-        "  notify: Restart openclaw gateway"
+        "  notify: Restart openclaw"
     )
     extract_new = (
         "- name: Extract OpenClaw Multi-Session Plugins\n"
@@ -1792,7 +1792,7 @@ if path.exists():
         "    group: \"{{ gateway_openclaw_service_group }}\"\n"
         "    mode: \"0755\"\n"
         "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
-        "  notify: Restart openclaw gateway\n"
+        "  notify: Restart openclaw\n"
         "  when: ansible_os_family != 'Darwin'"
     )
     if extract_old in text:
@@ -1836,7 +1836,7 @@ if path.exists():
         "    group: \"{{ gateway_openclaw_service_group }}\"\n"
         "  become_user: \"{{ gateway_openclaw_service_user }}\"\n"
         "  when: ansible_os_family == 'Darwin'\n"
-        "  notify: Restart openclaw gateway\n"
+        "  notify: Restart openclaw\n"
         "\n"
     )
     if anchor in text and "Clone openclaw-multi-session-plugins repository (macOS)" not in text:
