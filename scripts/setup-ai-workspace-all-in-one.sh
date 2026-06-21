@@ -58,7 +58,7 @@ XWORKSPACE_CONSOLE_REPO_URL=${XWORKSPACE_CONSOLE_REPO_URL:-"https://github.com/a
 XWORKSPACE_CONSOLE_DIR=${XWORKSPACE_CONSOLE_DIR:-""}
 if [ -z "$XWORKSPACE_CONSOLE_DIR" ]; then
     # Try to auto-detect if we are running inside a local checkout on macOS
-    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || pwd)"
+    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" && pwd 2>/dev/null || pwd)"
     if [ -d "$_script_dir/../api" ] && [ -d "$_script_dir/../dashboard" ]; then
         XWORKSPACE_CONSOLE_DIR="$(dirname "$_script_dir")"
     else
@@ -73,7 +73,7 @@ XWORKMATE_BRIDGE_SOURCE_DIR=${XWORKMATE_BRIDGE_SOURCE_DIR:-"/tmp/xworkmate-bridg
 OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC=${OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC:-"github:x-evor/openclaw-multi-session-plugins#main"}
 OPENCLAW_MULTI_SESSION_PLUGIN_DIR=${OPENCLAW_MULTI_SESSION_PLUGIN_DIR:-""}
 if [ -z "$OPENCLAW_MULTI_SESSION_PLUGIN_DIR" ]; then
-    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || pwd)"
+    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" && pwd 2>/dev/null || pwd)"
     if [ -d "$_script_dir/../../openclaw-multi-session-plugins" ]; then
         OPENCLAW_MULTI_SESSION_PLUGIN_DIR="$(cd "$_script_dir/../../openclaw-multi-session-plugins" && pwd)"
     else
@@ -2416,7 +2416,7 @@ uninstall_ai_workspace() {
 }
 
 if [ "${AI_WORKSPACE_BOOTSTRAP_LIB_ONLY:-false}" = "true" ]; then
-    if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    if [ "${BASH_SOURCE[0]:-}" != "$0" ]; then
         return 0
     fi
     exit 0
