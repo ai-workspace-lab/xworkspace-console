@@ -1,4 +1,4 @@
-name: Build XWorkspace Console Runtime Release
+name: Build XWorkspace Console Runtime & Offline Package
 
 on:
   push:
@@ -9,103 +9,75 @@ on:
       - scripts/**
       - .github/workflows/runtime-release.yaml
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Offline release tag. Leave empty to use offline-ai-workspace-<run_number>"
+        required: false
+        type: string
+      playbooks_ref:
+        description: "ai-workspace-infra/playbooks git ref"
+        required: false
+        default: "main"
+        type: string
+      console_ref:
+        description: "ai-workspace-lab/xworkspace-console git ref"
+        required: false
+        default: "main"
+        type: string
+      core_skills_ref:
+        description: "ai-workspace-lab/xworkspace-core-skills git ref"
+        required: false
+        default: "main"
+        type: string
+      bridge_runtime_release_tag:
+        description: "Bridge runtime release tag, or latest-runtime"
+        required: false
+        default: "latest-runtime"
+        type: string
+      qmd_runtime_release_tag:
+        description: "QMD runtime release tag, or latest-runtime"
+        required: false
+        default: "latest-runtime"
+        type: string
+      litellm_runtime_release_tag:
+        description: "LiteLLM runtime release tag, or latest-runtime"
+        required: false
+        default: "latest-runtime"
+        type: string
 
 permissions:
   contents: write
   actions: write
 
 concurrency:
-  group: xworkspace-console-runtime-release-${{ github.ref }}
-  cancel-in-progress: true
+  group: xworkspace-console-runtime-and-offline-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
-    name: Build linux-${{ matrix.arch }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: api/go.mod
-          cache: false
-
-      - name: Build target runtime
-        env:
-          TARGET_ARCH: ${{ matrix.arch }}
-        run: |
-          set -euo pipefail
-          root="dist/runtime/xworkspace-console"
-          mkdir -p "${root}/dashboard" "${root}/bin" "dist/assets"
-
-          cp -a scripts "${root}/"
-          cp dashboard/package.json dashboard/package-lock.json dashboard/index.html \
-            dashboard/tsconfig.json dashboard/vite.config.ts "${root}/dashboard/"
-          cp -a dashboard/src "${root}/dashboard/"
-
-          docker run --rm --platform "linux/${TARGET_ARCH}" \
-            -v "${PWD}/dashboard:/src:ro" \
-            -v "${PWD}/${root}/dashboard:/out" \
-            node:24-bookworm \
-            bash -lc '
-              set -euo pipefail
-              cp -a /src/. /tmp/dashboard/
-              cd /tmp/dashboard
-              npm ci --no-audit --no-fund
-              npm run build
-              cp -a dist node_modules /out/
-            '
-
-          (
-            cd api
-            CGO_ENABLED=0 GOOS=linux GOARCH="${TARGET_ARCH}" \
-              go build -buildvcs=false -trimpath -o "../${root}/bin/xworkspace-api" .
-          )
-
-          cat > "${root}/manifest.json" <<JSON
-          {
-            "component": "xworkspace-console",
-            "commit": "${GITHUB_SHA}",
-            "os": "linux",
-            "arch": "${TARGET_ARCH}",
-            "apiBinary": "bin/xworkspace-api",
-            "dashboard": "dashboard"
-          }
-          JSON
-          tar -czf "dist/assets/xworkspace-console-runtime-linux-${TARGET_ARCH}.tar.gz" \
-            -C "dist/runtime" xworkspace-console
-          (
-            cd dist/assets
-            sha256sum -- ./*.tar.gz | sed 's# \./# #' > "SHA256SUMS-${TARGET_ARCH}"
-          )
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: xworkspace-console-runtime-linux-${{ matrix.arch }}
-          path: |
-            dist/assets/*.tar.gz
-            dist/assets/SHA256SUMS-*
-          if-no-files-found: error
-
-  build-darwin:
-    name: Build darwin-${{ matrix.arch }}
+    name: Build runtime ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: arm64
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+          - os: darwin
+            arch: arm64
             runner: macos-14
-          - arch: amd64
+          - os: darwin
+            arch: amd64
             runner: macos-13
-    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.os == 'linux'
 
       - uses: actions/setup-go@v6
         with:
@@ -113,11 +85,13 @@ jobs:
           cache: false
 
       - uses: actions/setup-node@v4
+        if: matrix.os == 'darwin'
         with:
           node-version: "24"
 
       - name: Build target runtime
         env:
+          TARGET_OS: ${{ matrix.os }}
           TARGET_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
@@ -129,18 +103,34 @@ jobs:
             dashboard/tsconfig.json dashboard/vite.config.ts "${root}/dashboard/"
           cp -a dashboard/src "${root}/dashboard/"
 
-          # Native macOS build: npm + go run on the matching arch runner so the
-          # dashboard node_modules and the API binary are genuinely darwin/${TARGET_ARCH}.
-          (
-            cd dashboard
-            npm ci --no-audit --no-fund
-            npm run build
-          )
-          cp -a dashboard/dist dashboard/node_modules "${root}/dashboard/"
+          if [ "${TARGET_OS}" = "linux" ]; then
+            # Cross-arch dashboard build inside a matching linux/${TARGET_ARCH} container.
+            docker run --rm --platform "linux/${TARGET_ARCH}" \
+              -v "${PWD}/dashboard:/src:ro" \
+              -v "${PWD}/${root}/dashboard:/out" \
+              node:24-bookworm \
+              bash -lc '
+                set -euo pipefail
+                cp -a /src/. /tmp/dashboard/
+                cd /tmp/dashboard
+                npm ci --no-audit --no-fund
+                npm run build
+                cp -a dist node_modules /out/
+              '
+          else
+            # Native macOS build on the matching arch runner so node_modules and
+            # the API binary are genuinely darwin/${TARGET_ARCH}.
+            (
+              cd dashboard
+              npm ci --no-audit --no-fund
+              npm run build
+            )
+            cp -a dashboard/dist dashboard/node_modules "${root}/dashboard/"
+          fi
 
           (
             cd api
-            CGO_ENABLED=0 GOOS=darwin GOARCH="${TARGET_ARCH}" \
+            CGO_ENABLED=0 GOOS="${TARGET_OS}" GOARCH="${TARGET_ARCH}" \
               go build -buildvcs=false -trimpath -o "../${root}/bin/xworkspace-api" .
           )
 
@@ -148,22 +138,26 @@ jobs:
           {
             "component": "xworkspace-console",
             "commit": "${GITHUB_SHA}",
-            "os": "darwin",
+            "os": "${TARGET_OS}",
             "arch": "${TARGET_ARCH}",
             "apiBinary": "bin/xworkspace-api",
             "dashboard": "dashboard"
           }
           JSON
-          tar -czf "dist/assets/xworkspace-console-runtime-darwin-${TARGET_ARCH}.tar.gz" \
+          tar -czf "dist/assets/xworkspace-console-runtime-${TARGET_OS}-${TARGET_ARCH}.tar.gz" \
             -C "dist/runtime" xworkspace-console
           (
             cd dist/assets
-            shasum -a 256 -- ./*.tar.gz | sed 's# \./# #' > "SHA256SUMS-darwin-${TARGET_ARCH}"
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum -- ./*.tar.gz | sed 's# \./# #' > "SHA256SUMS-${TARGET_OS}-${TARGET_ARCH}"
+            else
+              shasum -a 256 -- ./*.tar.gz | sed 's# \./# #' > "SHA256SUMS-${TARGET_OS}-${TARGET_ARCH}"
+            fi
           )
 
       - uses: actions/upload-artifact@v4
         with:
-          name: xworkspace-console-runtime-darwin-${{ matrix.arch }}
+          name: xworkspace-console-runtime-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             dist/assets/*.tar.gz
             dist/assets/SHA256SUMS-*
@@ -171,8 +165,10 @@ jobs:
 
   publish:
     name: Publish runtime release
-    needs: [build, build-darwin]
+    needs: build
     runs-on: ubuntu-latest
+    outputs:
+      runtime_tag: ${{ steps.publish.outputs.tag }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -181,6 +177,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish assets
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -196,9 +193,309 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --target "${GITHUB_SHA}" \
               --title "XWorkspace Console runtime ${GITHUB_SHA::12}" \
-              --notes "Prebuilt Linux runtime assets. No target-host build is required."
+              --notes "Prebuilt Linux and macOS runtime assets. No target-host build is required."
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  build-offline-package:
+    name: Build offline ${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}
+    needs: publish
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian
+            version: "13"
+            arch: amd64
+          - distro: debian
+            version: "13"
+            arch: arm64
+          - distro: debian
+            version: "12"
+            arch: amd64
+          - distro: debian
+            version: "12"
+            arch: arm64
+          - distro: debian
+            version: "11"
+            arch: amd64
+          - distro: debian
+            version: "11"
+            arch: arm64
+          - distro: ubuntu
+            version: "26.04"
+            arch: amd64
+          - distro: ubuntu
+            version: "26.04"
+            arch: arm64
+          - distro: ubuntu
+            version: "24.04"
+            arch: amd64
+          - distro: ubuntu
+            version: "24.04"
+            arch: arm64
+          - distro: ubuntu
+            version: "22.04"
+            arch: amd64
+          - distro: ubuntu
+            version: "22.04"
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable QEMU for cross-arch package collection
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y curl git jq python3-pip
+
+      - name: Build offline package
+        env:
+          DISTRO_ID: ${{ matrix.distro }}
+          DISTRO_VERSION: ${{ matrix.version }}
+          ARCH: ${{ matrix.arch }}
+          PLAYBOOKS_REF: ${{ github.event.inputs.playbooks_ref || 'main' }}
+          CONSOLE_REF: ${{ github.event_name == 'push' && github.sha || github.event.inputs.console_ref || 'main' }}
+          CORE_SKILLS_REF: ${{ github.event.inputs.core_skills_ref || 'main' }}
+          CONSOLE_RUNTIME_RELEASE_TAG: ${{ needs.publish.outputs.runtime_tag }}
+          BRIDGE_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.bridge_runtime_release_tag || 'latest-runtime' }}
+          QMD_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.qmd_runtime_release_tag || 'latest-runtime' }}
+          LITELLM_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.litellm_runtime_release_tag || 'latest-runtime' }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/create-ai-workspace-offline-package.sh
+          scripts/create-ai-workspace-offline-package.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}
+          path: ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  test-offline-package:
+    needs: build-offline-package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian
+            version: "13"
+            arch: amd64
+          - distro: ubuntu
+            version: "24.04"
+            arch: amd64
+          - distro: debian
+            version: "13"
+            arch: arm64
+          - distro: ubuntu
+            version: "24.04"
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify online bootstrap hands off to offline installer
+        run: |
+          set -euo pipefail
+          fixture="${RUNNER_TEMP}/offline-handoff"
+          mkdir -p "${fixture}/scripts" "${fixture}/metadata"
+          cat > "${fixture}/metadata/target.env" <<EOF
+          DISTRO_ID=${{ matrix.distro }}
+          DISTRO_VERSION=${{ matrix.version }}
+          ARCH=${{ matrix.arch }}
+          EOF
+          cat > "${fixture}/scripts/ai-workspace-offline-install.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          test "${AI_WORKSPACE_OFFLINE_ACTIVE:-}" = "true"
+          printf 'offline-handoff-ok\n'
+          EOF
+          chmod +x "${fixture}/scripts/ai-workspace-offline-install.sh"
+          output="$(
+            AI_WORKSPACE_OFFLINE_MODE=force \
+            AI_WORKSPACE_OFFLINE_PACKAGE="${fixture}" \
+            AI_WORKSPACE_OFFLINE_DISTRO_ID=${{ matrix.distro }} \
+            AI_WORKSPACE_OFFLINE_DISTRO_VERSION=${{ matrix.version }} \
+            AI_WORKSPACE_OFFLINE_ARCH=${{ matrix.arch }} \
+            bash scripts/setup-ai-workspace-all-in-one.sh
+          )"
+          grep -q 'offline-handoff-ok' <<<"${output}"
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}
+          path: offline-test
+
+      - name: Verify offline package contents
+        run: |
+          set -euo pipefail
+          cd offline-test
+          tar -tzf ai-workspace-all-in-one-offline-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}.tar.gz > contents.txt
+          grep -q 'scripts/ai-workspace-offline-install.sh' contents.txt
+          grep -q 'metadata/manifest.json' contents.txt
+          grep -q 'metadata/target.env' contents.txt
+          grep -q 'repos/playbooks' contents.txt
+          grep -q 'repos/xworkspace-console' contents.txt
+          grep -q 'packages/components/xworkspace-console-runtime-linux-${{ matrix.arch }}.tar.gz' contents.txt
+          grep -q 'packages/components/xworkmate-bridge-linux-${{ matrix.arch }}.tar.gz' contents.txt
+          grep -q 'packages/components/qmd-runtime-linux-${{ matrix.arch }}.tar.gz' contents.txt
+          grep -q 'packages/components/litellm-runtime-${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}.tar.gz' contents.txt
+          grep -q 'metadata/litellm-runtime.env' contents.txt
+          grep -q 'metadata/components/xworkmate-bridge.tag' contents.txt
+          grep -q 'packages/apt/Packages.gz' contents.txt
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            grep -Eq 'packages/playwright-browsers/.*/chrome-linux(64)?/chrome$' contents.txt
+            grep -q 'metadata/apt/browser-deb-packages.txt' contents.txt
+          fi
+          if [[ "${{ matrix.distro }}:${{ matrix.version }}" == "ubuntu:26.04" ]]; then
+            grep -Eq 'packages/python/.*/bin/python3.13$' contents.txt
           fi
 
-          gh workflow run offline-package-ai-workspace-installer.yaml \
-            --repo "${GITHUB_REPOSITORY}" \
-            -f "console_runtime_release_tag=${tag}"
+  publish-release:
+    needs: [test-offline-package, publish]
+    runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || format('offline-ai-workspace-{0}', github.run_number) }}
+      CONSOLE_RUNTIME_RELEASE_TAG: ${{ needs.publish.outputs.runtime_tag }}
+      RSYNC_SSH_KEY: ${{ secrets.RSYNC_SSH_KEY }}
+      RSYNC_SSH_USER: ${{ secrets.RSYNC_SSH_USER }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      REMOTE_ROOT: /data/update-server/offline-package/ai-workspace
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists"
+          else
+            gh release create "$TAG_NAME" --title "Build $TAG_NAME" --notes "Offline AI Workspace all-in-one packages."
+          fi
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: ai-workspace-all-in-one-offline-*
+          merge-multiple: true
+
+      - name: Download console runtime release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          runtime_tag="$CONSOLE_RUNTIME_RELEASE_TAG"
+          if [[ "$runtime_tag" == "latest-runtime" || -z "$runtime_tag" ]]; then
+            runtime_tag="$(
+              gh release list \
+                --limit 50 \
+                --json tagName \
+                --jq '[.[].tagName | select(startswith("runtime-"))][0]'
+            )"
+          fi
+          if [[ -z "$runtime_tag" || "$runtime_tag" == "null" ]]; then
+            echo "Unable to resolve console runtime release tag" >&2
+            exit 1
+          fi
+          echo "Downloading console runtime assets from ${runtime_tag}"
+          gh release download "$runtime_tag" \
+            --pattern 'xworkspace-console-runtime-*.tar.gz' \
+            --pattern 'SHA256SUMS' \
+            --dir release-artifacts \
+            --clobber
+
+      - name: Upload packages to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          # GitHub release assets are hard-capped at 2 GiB. Packages at/over the
+          # limit are split into <2 GiB parts plus a ".parts" manifest; the
+          # offline bootstrap reassembles them. Parts are 1900 MiB.
+          GH_ASSET_LIMIT=2147483648
+          SPLIT_SIZE=1900m
+
+          delete_asset_if_present() {
+            local name=$1
+            if gh release view "$TAG_NAME" --json assets --jq '.assets[].name' \
+                 2>/dev/null | grep -Fxq "$name"; then
+              echo "Deleting existing release asset ${name}"
+              gh release delete-asset "$TAG_NAME" "$name" --yes
+            fi
+          }
+
+          upload_one() {
+            local file=$1 name attempt
+            name="$(basename "$file")"
+            delete_asset_if_present "$name"
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG_NAME" "$file" --clobber; then
+                return 0
+              fi
+              if [[ "$attempt" -eq 3 ]]; then
+                echo "Failed to upload ${file} after ${attempt} attempts" >&2
+                return 1
+              fi
+              sleep $((attempt * 20))
+            done
+          }
+
+          packages=(release-artifacts/*.tar.gz)
+          if [[ ${#packages[@]} -eq 0 ]]; then
+            echo "No offline packages found in release-artifacts" >&2
+            exit 1
+          fi
+
+          for package in "${packages[@]}"; do
+            asset_name="$(basename "$package")"
+            size="$(stat -c%s "$package")"
+            if [[ "$size" -lt "$GH_ASSET_LIMIT" ]]; then
+              echo "Uploading ${asset_name} (${size} bytes)"
+              upload_one "$package"
+            else
+              echo "Splitting oversized ${asset_name} (${size} bytes) into ${SPLIT_SIZE} parts"
+              dir="$(dirname "$package")"
+              (
+                cd "$dir"
+                rm -f "${asset_name}".part-* "${asset_name}.parts"
+                split -b "$SPLIT_SIZE" -d -a 3 "$asset_name" "${asset_name}.part-"
+                ls "${asset_name}".part-* | LC_ALL=C sort > "${asset_name}.parts"
+              )
+              # Remove any stale whole asset, then publish the manifest + parts.
+              delete_asset_if_present "$asset_name"
+              upload_one "${dir}/${asset_name}.parts"
+              for part in "${dir}/${asset_name}".part-*; do
+                echo "Uploading $(basename "$part")"
+                upload_one "$part"
+              done
+            fi
+          done
+
+      - name: Rsync packages to remote mirror
+        if: ${{ env.RSYNC_SSH_KEY != '' && env.RSYNC_SSH_USER != '' && env.VPS_HOST != '' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y rsync openssh-client
+          mkdir -p ~/.ssh
+          echo "$RSYNC_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          remote_dir="${REMOTE_ROOT}/${TAG_NAME}"
+          ssh -i ~/.ssh/id_rsa "${RSYNC_SSH_USER}@${VPS_HOST}" "mkdir -p '${remote_dir}'"
+          rsync -av -e "ssh -i ~/.ssh/id_rsa" release-artifacts/*.tar.gz \
+            "${RSYNC_SSH_USER}@${VPS_HOST}:${remote_dir}/"
