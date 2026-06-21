@@ -46,3 +46,9 @@ dashboard/public/status.json
 build/
 coverage/
 *.iml
+
+# temporary offline folders and build artifacts
+/ai-workspace-all-in-one-offline-ubuntu-22.04-amd64/
+/dashboard/.ai-workspace-build-commit
+*.textClipping
+
