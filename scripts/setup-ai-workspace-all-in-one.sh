@@ -56,13 +56,30 @@ TARGET_DIR=${TARGET_DIR:-"/tmp/ai-workspace-deploy"}
 PLAYBOOK_DIR=${PLAYBOOK_DIR:-""}
 XWORKSPACE_CONSOLE_REPO_URL=${XWORKSPACE_CONSOLE_REPO_URL:-"https://github.com/ai-workspace-lab/xworkspace-console.git"}
 XWORKSPACE_CONSOLE_DIR=${XWORKSPACE_CONSOLE_DIR:-""}
+if [ -z "$XWORKSPACE_CONSOLE_DIR" ]; then
+    # Try to auto-detect if we are running inside a local checkout on macOS
+    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || pwd)"
+    if [ -d "$_script_dir/../api" ] && [ -d "$_script_dir/../dashboard" ]; then
+        XWORKSPACE_CONSOLE_DIR="$(dirname "$_script_dir")"
+    else
+        XWORKSPACE_CONSOLE_DIR="$HOME/xworkspace-console"
+    fi
+fi
 XWORKSPACE_CORE_SKILLS_REPO_URL=${XWORKSPACE_CORE_SKILLS_REPO_URL:-"https://github.com/ai-workspace-lab/xworkspace-core-skills.git"}
 XWORKSPACE_CORE_SKILLS_DIR=${XWORKSPACE_CORE_SKILLS_DIR:-"/tmp/xworkspace-core-skills"}
 XWORKMATE_BRIDGE_REPO_URL=${XWORKMATE_BRIDGE_REPO_URL:-"https://github.com/ai-workspace-lab/xworkmate-bridge.git"}
 XWORKMATE_BRIDGE_BRANCH=${XWORKMATE_BRIDGE_BRANCH:-"release/v1.1.4"}
 XWORKMATE_BRIDGE_SOURCE_DIR=${XWORKMATE_BRIDGE_SOURCE_DIR:-"/tmp/xworkmate-bridge"}
 OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC=${OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC:-"github:x-evor/openclaw-multi-session-plugins#main"}
-OPENCLAW_MULTI_SESSION_PLUGIN_DIR=${OPENCLAW_MULTI_SESSION_PLUGIN_DIR:-"/tmp/openclaw-multi-session-plugins"}
+OPENCLAW_MULTI_SESSION_PLUGIN_DIR=${OPENCLAW_MULTI_SESSION_PLUGIN_DIR:-""}
+if [ -z "$OPENCLAW_MULTI_SESSION_PLUGIN_DIR" ]; then
+    _script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || pwd)"
+    if [ -d "$_script_dir/../../openclaw-multi-session-plugins" ]; then
+        OPENCLAW_MULTI_SESSION_PLUGIN_DIR="$(cd "$_script_dir/../../openclaw-multi-session-plugins" && pwd)"
+    else
+        OPENCLAW_MULTI_SESSION_PLUGIN_DIR="/tmp/openclaw-multi-session-plugins"
+    fi
+fi
 AUTH_TOKEN_FILE=${AI_WORKSPACE_AUTH_TOKEN_FILE:-"$HOME/.ai_workspace_auth_token"}
 AI_WORKSPACE_LITELLM_PORT=${AI_WORKSPACE_LITELLM_PORT:-"4000"}
 AI_WORKSPACE_DEFAULT_MODEL=${AI_WORKSPACE_DEFAULT_MODEL:-"deepseek/deepseek-v4-flash"}
@@ -1507,6 +1524,328 @@ if prov_path.exists():
 PY
 }
 
+# The remote setup-xworkspace-console playbook downloads a prebuilt runtime
+# archive for Linux, but no Darwin release archives are built. On Darwin, skip
+# downloading/unpacking and instead clone the git repository and build from source.
+patch_playbook_console_macos() {
+    local main_file="setup-xworkspace-console.yaml"
+    local macos_file="xworkspace_console_macos.yml"
+    [ -f "$main_file" ] || return 0
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("setup-xworkspace-console.yaml")
+if path.exists():
+    text = path.read_text()
+
+    # 1. Skip release archive download/validate/install tasks on macOS.
+    download_old = (
+        "    - name: Download XWorkspace Console runtime release\n"
+        "      ansible.builtin.get_url:\n"
+        "        url: \"https://github.com/ai-workspace-lab/xworkspace-console/releases/latest/download/xworkspace-console-runtime-{{ ansible_system | lower }}-{{ 'amd64' if ansible_architecture in ['x86_64', 'amd64'] else 'arm64' }}.tar.gz\"\n"
+        "        dest: \"/tmp/xworkspace-console-runtime.tar.gz\"\n"
+        "        mode: \"0644\"\n"
+        "        force: true\n"
+        "      when: xworkspace_console_runtime_archive | length == 0"
+    )
+    download_new = (
+        "    - name: Download XWorkspace Console runtime release\n"
+        "      ansible.builtin.get_url:\n"
+        "        url: \"https://github.com/ai-workspace-lab/xworkspace-console/releases/latest/download/xworkspace-console-runtime-{{ ansible_system | lower }}-{{ 'amd64' if ansible_architecture in ['x86_64', 'amd64'] else 'arm64' }}.tar.gz\"\n"
+        "        dest: \"/tmp/xworkspace-console-runtime.tar.gz\"\n"
+        "        mode: \"0644\"\n"
+        "        force: true\n"
+        "      when:\n"
+        "        - xworkspace_console_runtime_archive | length == 0\n"
+        "        - ansible_os_family != 'Darwin'"
+    )
+    if download_old in text:
+        text = text.replace(download_old, download_new, 1)
+
+    validate_old = (
+        "    - name: Validate packaged XWorkspace Console runtime\n"
+        "      ansible.builtin.stat:\n"
+        "        path: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+        "      register: xworkspace_console_runtime_archive_stat"
+    )
+    validate_new = (
+        "    - name: Validate packaged XWorkspace Console runtime\n"
+        "      ansible.builtin.stat:\n"
+        "        path: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+        "      register: xworkspace_console_runtime_archive_stat\n"
+        "      when: ansible_os_family != 'Darwin'"
+    )
+    if validate_old in text and (validate_old + "\n      when:") not in text:
+        text = text.replace(validate_old, validate_new, 1)
+
+    require_old = (
+        "    - name: Require packaged XWorkspace Console runtime\n"
+        "      ansible.builtin.assert:\n"
+        "        that:\n"
+        "          - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+        "        fail_msg: \"A valid XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE is required or download failed.\""
+    )
+    require_new = (
+        "    - name: Require packaged XWorkspace Console runtime\n"
+        "      ansible.builtin.assert:\n"
+        "        that:\n"
+        "          - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+        "        fail_msg: \"A valid XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE is required or download failed.\"\n"
+        "      when: ansible_os_family != 'Darwin'"
+    )
+    if require_old in text and (require_old + "\n      when:") not in text:
+        text = text.replace(require_old, require_new, 1)
+
+    marker_old = (
+        "    - name: Inspect installed XWorkspace Console runtime marker\n"
+        "      ansible.builtin.slurp:\n"
+        "        path: \"{{ xworkspace_console_runtime_marker }}\"\n"
+        "      register: xworkspace_console_runtime_marker_content\n"
+        "      failed_when: false"
+    )
+    marker_new = (
+        "    - name: Inspect installed XWorkspace Console runtime marker\n"
+        "      ansible.builtin.slurp:\n"
+        "        path: \"{{ xworkspace_console_runtime_marker }}\"\n"
+        "      register: xworkspace_console_runtime_marker_content\n"
+        "      failed_when: false\n"
+        "      when: ansible_os_family != 'Darwin'"
+    )
+    if marker_old in text and (marker_old + "\n      when:") not in text:
+        text = text.replace(marker_old, marker_new, 1)
+
+    install_old = (
+        "    - name: Install packaged XWorkspace Console runtime\n"
+        "      ansible.builtin.unarchive:\n"
+        "        src: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+        "        dest: \"{{ xworkspace_console_repo_dir | dirname }}\"\n"
+        "        remote_src: true\n"
+        "        owner: \"{{ xworkspace_console_user }}\"\n"
+        "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+        "      when:\n"
+        "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+        "        - >-\n"
+        "          (xworkspace_console_runtime_marker_content.content | default('') | b64decode | trim)\n"
+        "          != (xworkspace_console_runtime_archive_stat.stat.checksum | default(''))\n"
+        "          or not (xworkspace_console_api_binary is file)\n"
+        "          or not ((xworkspace_console_dashboard_dir ~ '/dist/index.html') is file)"
+    )
+    install_new = (
+        "    - name: Install packaged XWorkspace Console runtime\n"
+        "      ansible.builtin.unarchive:\n"
+        "        src: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+        "        dest: \"{{ xworkspace_console_repo_dir | dirname }}\"\n"
+        "        remote_src: true\n"
+        "        owner: \"{{ xworkspace_console_user }}\"\n"
+        "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+        "      when:\n"
+        "        - ansible_os_family != 'Darwin'\n"
+        "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+        "        - >-\n"
+        "          (xworkspace_console_runtime_marker_content.content | default('') | b64decode | trim)\n"
+        "          != (xworkspace_console_runtime_archive_stat.stat.checksum | default(''))\n"
+        "          or not (xworkspace_console_api_binary is file)\n"
+        "          or not ((xworkspace_console_dashboard_dir ~ '/dist/index.html') is file)"
+    )
+    if install_old in text:
+        text = text.replace(install_old, install_new, 1)
+
+    record_old = (
+        "    - name: Record installed XWorkspace Console runtime checksum\n"
+        "      ansible.builtin.copy:\n"
+        "        dest: \"{{ xworkspace_console_runtime_marker }}\"\n"
+        "        owner: \"{{ xworkspace_console_user }}\"\n"
+        "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+        "        mode: \"0644\"\n"
+        "        content: \"{{ xworkspace_console_runtime_archive_stat.stat.checksum }}\\n\"\n"
+        "      when:\n"
+        "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)"
+    )
+    record_new = (
+        "    - name: Record installed XWorkspace Console runtime checksum\n"
+        "      ansible.builtin.copy:\n"
+        "        dest: \"{{ xworkspace_console_runtime_marker }}\"\n"
+        "        owner: \"{{ xworkspace_console_user }}\"\n"
+        "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+        "        mode: \"0644\"\n"
+        "        content: \"{{ xworkspace_console_runtime_archive_stat.stat.checksum }}\\n\"\n"
+        "      when:\n"
+        "        - ansible_os_family != 'Darwin'\n"
+        "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)"
+    )
+    if record_old in text:
+        text = text.replace(record_old, record_new, 1)
+
+    # 2. Inject Clone and Build tasks on macOS (Darwin).
+    anchor = "    - name: Deploy AI Workspace portal service configuration"
+    injected_tasks = (
+        "    - name: Check if xworkspace-console repo already exists (macOS)\n"
+        "      ansible.builtin.stat:\n"
+        "        path: \"{{ xworkspace_console_repo_dir }}/.git\"\n"
+        "      register: xworkspace_console_git_stat_macos\n"
+        "      when: ansible_os_family == 'Darwin'\n"
+        "\n"
+        "    - name: Clone xworkspace-console repository (macOS)\n"
+        "      ansible.builtin.git:\n"
+        "        repo: \"{{ xworkspace_console_source_repo }}\"\n"
+        "        dest: \"{{ xworkspace_console_repo_dir }}\"\n"
+        "        version: \"{{ xworkspace_console_source_version }}\"\n"
+        "        depth: 1\n"
+        "      become_user: \"{{ xworkspace_console_user }}\"\n"
+        "      when:\n"
+        "        - ansible_os_family == 'Darwin'\n"
+        "        - not (xworkspace_console_git_stat_macos.stat.exists | default(false))\n"
+        "\n"
+        "    - name: Build dashboard assets on target (macOS)\n"
+        "      ansible.builtin.shell: |\n"
+        "        set -euo pipefail\n"
+        "        cd \"{{ xworkspace_console_dashboard_dir }}\"\n"
+        "        source_commit=\"$(git -C \"{{ xworkspace_console_repo_dir }}\" rev-parse HEAD)\"\n"
+        "        marker=\".ai-workspace-build-commit\"\n"
+        "        if [ -f \"dist/index.html\" ] && [ \"$(cat \"$marker\" 2>/dev/null || true)\" = \"$source_commit\" ]; then\n"
+        "          echo \"build=unchanged\"\n"
+        "          exit 0\n"
+        "        fi\n"
+        "        npm install && npm run build\n"
+        "        printf '%s\\n' \"$source_commit\" > \"$marker\"\n"
+        "        echo \"build=changed\"\n"
+      "      args:\n"
+        "        executable: /bin/bash\n"
+        "      become_user: \"{{ xworkspace_console_user }}\"\n"
+        "      register: xworkspace_console_dashboard_build_macos\n"
+        "      changed_when: \"'build=changed' in (xworkspace_console_dashboard_build_macos.stdout | default(''))\"\n"
+        "      when: ansible_os_family == 'Darwin'\n"
+        "\n"
+    )
+    if anchor in text and "Clone xworkspace-console repository (macOS)" not in text:
+        text = text.replace(anchor, injected_tasks + anchor, 1)
+
+    path.write_text(text)
+
+# Patch xworkspace_console_macos.yml to ensure LaunchAgents directory exists
+macos_path = Path("xworkspace_console_macos.yml")
+if macos_path.exists():
+    macos_text = macos_path.read_text()
+    launchagents_task = (
+        "- name: Ensure macOS LaunchAgents directory exists\n"
+        "  ansible.builtin.file:\n"
+        "    path: \"{{ ansible_env.HOME }}/Library/LaunchAgents\"\n"
+        "    state: directory\n"
+        "    mode: \"0755\"\n\n"
+    )
+    if "Ensure macOS LaunchAgents directory exists" not in macos_text:
+        if macos_text.startswith("---\n"):
+            macos_text = "---\n" + launchagents_task + macos_text[4:]
+        else:
+            macos_text = launchagents_task + macos_text
+        macos_path.write_text(macos_text)
+PY
+}
+
+patch_playbook_openclaw_macos() {
+    local main_file="roles/vhosts/gateway_openclaw/tasks/main.yml"
+    [ -f "$main_file" ] || return 0
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("roles/vhosts/gateway_openclaw/tasks/main.yml")
+if path.exists():
+    text = path.read_text()
+    
+    download_old = (
+        "- name: Download OpenClaw Multi-Session Plugins offline archive\n"
+        "  ansible.builtin.get_url:\n"
+        "    url: \"{{ gateway_openclaw_multi_session_plugin_archive_url }}\"\n"
+        "    dest: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+        "    mode: \"0644\""
+    )
+    download_new = (
+        "- name: Download OpenClaw Multi-Session Plugins offline archive\n"
+        "  ansible.builtin.get_url:\n"
+        "    url: \"{{ gateway_openclaw_multi_session_plugin_archive_url }}\"\n"
+        "    dest: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+        "    mode: \"0644\"\n"
+        "  when: ansible_os_family != 'Darwin'"
+    )
+    if download_old in text:
+        text = text.replace(download_old, download_new, 1)
+
+    extract_old = (
+        "- name: Extract OpenClaw Multi-Session Plugins\n"
+        "  ansible.builtin.unarchive:\n"
+        "    src: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+        "    dest: \"{{ gateway_openclaw_home }}/.openclaw/extensions\"\n"
+        "    remote_src: true\n"
+        "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
+        "    group: \"{{ gateway_openclaw_service_group }}\"\n"
+        "    mode: \"0755\"\n"
+        "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
+        "  notify: Restart openclaw gateway"
+    )
+    extract_new = (
+        "- name: Extract OpenClaw Multi-Session Plugins\n"
+        "  ansible.builtin.unarchive:\n"
+        "    src: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+        "    dest: \"{{ gateway_openclaw_home }}/.openclaw/extensions\"\n"
+        "    remote_src: true\n"
+        "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
+        "    group: \"{{ gateway_openclaw_service_group }}\"\n"
+        "    mode: \"0755\"\n"
+        "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
+        "  notify: Restart openclaw gateway\n"
+        "  when: ansible_os_family != 'Darwin'"
+    )
+    if extract_old in text:
+        text = text.replace(extract_old, extract_new, 1)
+
+    anchor = "- name: Ensure OpenClaw global plugin npm directory exists"
+    injected = (
+        "- name: Check if openclaw-multi-session-plugins repo exists (macOS)\n"
+        "  ansible.builtin.stat:\n"
+        "    path: \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}/.git\"\n"
+        "  register: openclaw_plugin_git_stat_macos\n"
+        "  when: ansible_os_family == 'Darwin'\n"
+        "\n"
+        "- name: Clone openclaw-multi-session-plugins repository (macOS)\n"
+        "  ansible.builtin.git:\n"
+        "    repo: \"https://github.com/ai-workspace-lab/openclaw-multi-session-plugins.git\"\n"
+        "    dest: \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}\"\n"
+        "    version: main\n"
+        "    depth: 1\n"
+        "  become_user: \"{{ gateway_openclaw_service_user }}\"\n"
+        "  when:\n"
+        "    - ansible_os_family == 'Darwin'\n"
+        "    - not (openclaw_plugin_git_stat_macos.stat.exists | default(false))\n"
+        "\n"
+        "- name: Build openclaw-multi-session-plugins (macOS)\n"
+        "  ansible.builtin.shell: |\n"
+        "    set -euo pipefail\n"
+        "    cd \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}\"\n"
+        "    npm install && npm run build\n"
+        "  args:\n"
+        "    executable: /bin/bash\n"
+        "  become_user: \"{{ gateway_openclaw_service_user }}\"\n"
+        "  when: ansible_os_family == 'Darwin'\n"
+        "\n"
+        "- name: Link openclaw-multi-session-plugins to extensions (macOS)\n"
+        "  ansible.builtin.file:\n"
+        "    src: \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}\"\n"
+        "    dest: \"{{ gateway_openclaw_home }}/.openclaw/extensions/openclaw-multi-session-plugins\"\n"
+        "    state: link\n"
+        "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
+        "    group: \"{{ gateway_openclaw_service_group }}\"\n"
+        "  become_user: \"{{ gateway_openclaw_service_user }}\"\n"
+        "  when: ansible_os_family == 'Darwin'\n"
+        "  notify: Restart openclaw gateway\n"
+        "\n"
+    )
+    if anchor in text and "Clone openclaw-multi-session-plugins repository (macOS)" not in text:
+        text = text.replace(anchor, injected + anchor, 1)
+
+    path.write_text(text)
+PY
+}
+
 ensure_core_skills_source() {
     if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
        [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
@@ -2296,6 +2635,8 @@ if [ "$(detect_os)" = "darwin" ]; then
     patch_playbook_common_macos
     patch_playbook_postgres_macos
     patch_playbook_litellm_macos
+    patch_playbook_console_macos
+    patch_playbook_openclaw_macos
 fi
 prefetch_independent_sources
 ensure_core_skills_source
@@ -2378,7 +2719,11 @@ if [ "$(detect_os)" = "darwin" ]; then
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_root=$HOME/.local/state/ai-workspace")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_config_dir=$HOME/.config/ai-workspace")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_scripts_dir=$HOME/xworkspace/scripts")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$HOME/xworkspace-console")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$XWORKSPACE_CONSOLE_DIR")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_repo=https://github.com/ai-workspace-lab/xworkspace-console.git")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_version=main")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_api_working_dir=$XWORKSPACE_CONSOLE_DIR/api")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_api_exec=/usr/bin/env go run .")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_group=staff")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_ttyd_binary_path=$(command -v ttyd)")
     ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_user=$(id -un)")
@@ -2389,6 +2734,7 @@ if [ "$(detect_os)" = "darwin" ]; then
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_home=$HOME")
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_compile_cache_dir=$HOME/.cache/openclaw-compile-cache")
     ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_path=$DARWIN_SERVICE_PATH")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_multi_session_plugin_dir=$OPENCLAW_MULTI_SESSION_PLUGIN_DIR")
     # XWorkMate Bridge writes its runtime data under a base dir that defaults to
     # /opt/cloud-neutral on Linux. That path is fine on Linux, but on macOS it
     # is both non-writable under become=false and non-standard for the platform.

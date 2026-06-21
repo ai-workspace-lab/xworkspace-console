@@ -7,7 +7,7 @@ on:
       - api/**
       - dashboard/**
       - scripts/**
-      - .github/workflows/runtime-release.yaml
+      - .github/workflows/offline-package-xworkspace-console-runtime.yaml
   workflow_dispatch:
     inputs:
       tag:
