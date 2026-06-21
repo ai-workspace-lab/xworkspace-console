@@ -217,6 +217,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TAG_NAME: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || format('offline-ai-workspace-{0}', github.run_number) }}
+      CONSOLE_RUNTIME_RELEASE_TAG: ${{ github.event.inputs.console_runtime_release_tag || 'latest-runtime' }}
       RSYNC_SSH_KEY: ${{ secrets.RSYNC_SSH_KEY }}
       RSYNC_SSH_USER: ${{ secrets.RSYNC_SSH_USER }}
       VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -241,6 +242,32 @@ jobs:
           path: release-artifacts
           pattern: ai-workspace-all-in-one-offline-*
           merge-multiple: true
+
+      - name: Download console runtime release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          runtime_tag="$CONSOLE_RUNTIME_RELEASE_TAG"
+          if [[ "$runtime_tag" == "latest-runtime" || -z "$runtime_tag" ]]; then
+            runtime_tag="$(
+              gh release list \
+                --limit 50 \
+                --json tagName \
+                --jq '[.[].tagName | select(startswith("runtime-"))][0]'
+            )"
+          fi
+          if [[ -z "$runtime_tag" || "$runtime_tag" == "null" ]]; then
+            echo "Unable to resolve console runtime release tag" >&2
+            exit 1
+          fi
+          echo "Downloading console runtime assets from ${runtime_tag}"
+          gh release download "$runtime_tag" \
+            --pattern 'xworkspace-console-runtime-*.tar.gz' \
+            --pattern 'SHA256SUMS' \
+            --dir release-artifacts \
+            --clobber
 
       - name: Upload packages to GitHub Release
         env:
