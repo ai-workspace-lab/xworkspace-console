@@ -366,7 +366,7 @@ install_prerequisites() {
         fi
     elif [ "$os" = "darwin" ]; then
         if command -v brew >/dev/null 2>&1; then
-            brew install git ansible
+            brew install git ansible gnu-tar
         else
             error "macOS requires git and ansible. Install Homebrew or install them manually, then rerun."
         fi
