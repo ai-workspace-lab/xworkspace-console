@@ -1,0 +1,660 @@
+#!/usr/bin/env python3
+"""
+This script is invoked by setup-ai-workspace-all-in-one.sh to patch playbooks for macOS.
+"""
+
+import os
+from pathlib import Path
+
+def main():
+    def patch_0():
+        
+        path = Path("setup-xworkspace-console.yaml")
+        text = path.read_text()
+        
+        commands = {
+            'su - {{ xworkspace_console_user }} -c "systemctl --user daemon-reload"': 'systemctl --user daemon-reload',
+            'su - {{ xworkspace_console_user }} -c "systemctl --user restart xworkspace-console.service"': 'systemctl --user restart xworkspace-console.service',
+            'su - {{ xworkspace_console_user }} -c "systemctl --user restart xworkspace-ttyd.service"': 'systemctl --user restart xworkspace-ttyd.service',
+        }
+        
+        def wrapped(systemctl_command: str) -> str:
+            lines = [
+                'uid="$(id -u {{ xworkspace_console_user }})"',
+                'loginctl enable-linger {{ xworkspace_console_user }} || true',
+                'systemctl start "user@${uid}.service" || true',
+                f'runuser -u {{{{ xworkspace_console_user }}}} -- env XDG_RUNTIME_DIR="/run/user/${{uid}}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${{uid}}/bus" {systemctl_command}',
+            ]
+            return "\n        ".join(lines)
+        
+        updated = text
+        for old, command in commands.items():
+            updated = updated.replace(old, wrapped(command))
+        
+        if updated != text:
+            path.write_text(updated)
+
+    patch_0()
+
+    def patch_1():
+        
+        vars_path = Path("roles/vhosts/vault/vars/main.yml")
+        tasks_path = Path("roles/vhosts/vault/tasks/main.yml")
+        macos_path = Path("roles/vhosts/vault/tasks/macos.yml")
+        
+        # 1) Make vault dirs and binary path OS-conditional (Linux unchanged).
+        vars_text = vars_path.read_text()
+        vars_subs = {
+            "vault_binary_path: /usr/local/bin/vault":
+                "vault_binary_path: \"{{ '/opt/homebrew/bin/vault' if ansible_os_family == 'Darwin' else '/usr/local/bin/vault' }}\"",
+            "vault_config_dir: /etc/vault.d":
+                "vault_config_dir: \"{{ (ansible_env.HOME ~ '/Library/Application Support/vault') if ansible_os_family == 'Darwin' else '/etc/vault.d' }}\"",
+            "vault_data_dir: /opt/vault/data":
+                "vault_data_dir: \"{{ (ansible_env.HOME ~ '/Library/Application Support/vault/data') if ansible_os_family == 'Darwin' else '/opt/vault/data' }}\"",
+        }
+        for old, new in vars_subs.items():
+            if old in vars_text:
+                vars_text = vars_text.replace(old, new)
+        vars_path.write_text(vars_text)
+        
+        # 2) Skip the root-owned directory creation task on macOS.
+        tasks_text = tasks_path.read_text()
+        dir_when_old = (
+            '  loop:\n'
+            '    - "{{ vault_config_dir }}"\n'
+            '    - "{{ vault_data_dir }}"\n'
+            '  when:\n'
+            '    - vault_deploy_mode == "standalone"\n'
+        )
+        dir_when_new = dir_when_old + "    - ansible_os_family != 'Darwin'\n"
+        if dir_when_old in tasks_text and "    - ansible_os_family != 'Darwin'\n\n- name: Deploy standalone Vault systemd" not in tasks_text:
+            tasks_text = tasks_text.replace(dir_when_old, dir_when_new, 1)
+        
+        # 2b) The admin bootstrap runs files/init_vault_admin.sh, which require_cmd's
+        # vault/jq/curl/base64. On macOS those live under Homebrew, which is not on the
+        # minimal PATH ansible.builtin.script uses; prepend the Homebrew bin dirs so the
+        # helper can find them.
+        boot_old = (
+            '    --ui-url {{ vault_admin_ui_url | quote }}\n'
+            '  no_log: true\n'
+        )
+        boot_new = (
+            '    --ui-url {{ vault_admin_ui_url | quote }}\n'
+            '  environment:\n'
+            '    PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}"\n'
+            '  no_log: true\n'
+        )
+        if boot_old in tasks_text and boot_new not in tasks_text:
+            tasks_text = tasks_text.replace(boot_old, boot_new, 1)
+        
+        tasks_path.write_text(tasks_text)
+        
+        # 2d) init_vault_admin.sh resolves the admin entity_id by logging in as the
+        # user. Once the login MFA enforcement it creates exists, that login is
+        # MFA-gated and returns no entity_id, so re-runs fail with "missing entityID".
+        # Resolve the entity via its userpass entity-alias instead (idempotent).
+        init_path = Path("roles/vhosts/vault/files/init_vault_admin.sh")
+        if init_path.exists():
+            init_text = init_path.read_text()
+            login_old = (
+                'bootstrap_json="$(vault write -format=json "auth/userpass/login/${USERNAME}" password="$PASSWORD")"\n'
+                'entity_id="$(printf \'%s\' "$bootstrap_json" | jq -r \'.auth.entity_id\')"\n'
+                'bootstrap_token="$(printf \'%s\' "$bootstrap_json" | jq -r \'.auth.client_token\')"\n'
+            )
+            login_new = (
+                'entity_id=""\n'
+                '# bootstrap_token kept defined (empty) so any later "vault token revoke\n'
+                '# $bootstrap_token" line stays valid under set -u; we no longer log in.\n'
+                'bootstrap_token=""\n'
+                'for alias_id in $(vault list -format=json identity/entity-alias/id 2>/dev/null | jq -r \'.[]?\'); do\n'
+                '  alias_json="$(vault read -format=json "identity/entity-alias/id/${alias_id}" 2>/dev/null || true)"\n'
+                '  alias_name="$(printf \'%s\' "$alias_json" | jq -r \'.data.name // empty\')"\n'
+                '  alias_mount="$(printf \'%s\' "$alias_json" | jq -r \'.data.mount_accessor // empty\')"\n'
+                '  if [[ "$alias_name" == "$USERNAME" && "$alias_mount" == "$userpass_accessor" ]]; then\n'
+                '    entity_id="$(printf \'%s\' "$alias_json" | jq -r \'.data.canonical_id // empty\')"\n'
+                '    break\n'
+                '  fi\n'
+                'done\n'
+                '\n'
+                'if [[ -z "$entity_id" ]]; then\n'
+                '  entity_id="$(vault write -format=json identity/entity name="$USERNAME" policies="$POLICY_NAME" | jq -r \'.data.id\')"\n'
+                '  vault write identity/entity-alias name="$USERNAME" canonical_id="$entity_id" mount_accessor="$userpass_accessor" >/dev/null\n'
+                'fi\n'
+            )
+            if login_old in init_text:
+                init_text = init_text.replace(login_old, login_new, 1)
+                # Note: we intentionally do NOT delete the later "vault token revoke
+                # $bootstrap_token" line — on some revisions it is wrapped in an if/fi,
+                # and removing it would leave an empty then-block (syntax error). With
+                # bootstrap_token="" set above, the revoke is a harmless no-op.
+                init_path.write_text(init_text)
+        
+        # 3) Create the macOS vault dirs (user-owned) before the launchd plist is laid down.
+        macos_text = macos_path.read_text()
+        dir_task = (
+            "- name: Ensure macOS Vault directories exist\n"
+            "  ansible.builtin.file:\n"
+            "    path: \"{{ item }}\"\n"
+            "    state: directory\n"
+            "    mode: \"0755\"\n"
+            "  loop:\n"
+            "    - \"{{ vault_config_dir }}\"\n"
+            "    - \"{{ vault_data_dir }}\"\n"
+            "    - \"{{ ansible_env.HOME }}/.local/state/xworkspace\"\n\n"
+        )
+        anchor = "- name: Install HashiCorp Tap\n"
+        if "Ensure macOS Vault directories exist" not in macos_text and anchor in macos_text:
+            macos_text = macos_text.replace(anchor, dir_task + anchor, 1)
+        
+        # jq is not preinstalled on macOS and the Linux apt task that installs it is
+        # Darwin-skipped, yet init_vault_admin.sh requires it. Install it via Homebrew.
+        vault_brew_old = (
+            "- name: Install Vault via Homebrew\n"
+            "  ansible.builtin.command: brew install hashicorp/tap/vault\n"
+            "  args:\n"
+            "    creates: /opt/homebrew/bin/vault\n"
+            "  changed_when: true\n"
+        )
+        jq_task = (
+            "\n- name: Install jq via Homebrew (required by Vault admin bootstrap)\n"
+            "  ansible.builtin.command: brew install jq\n"
+            "  args:\n"
+            "    creates: /opt/homebrew/bin/jq\n"
+            "  changed_when: true\n"
+        )
+        if vault_brew_old in macos_text and "Install jq via Homebrew" not in macos_text:
+            macos_text = macos_text.replace(vault_brew_old, vault_brew_old + jq_task, 1)
+        macos_path.write_text(macos_text)
+
+    patch_1()
+
+    def patch_2():
+        
+        path = Path("roles/vhosts/common/tasks/main.yml")
+        text = path.read_text()
+        guard = "  when: ansible_os_family != 'Darwin'\n"
+        
+        # Tasks that end with a trailing attribute and have no `when:` yet -> append guard.
+        append_blocks = [
+            ('- name: Base | set timezone\n'
+             '  ansible.builtin.command: "timedatectl set-timezone Asia/Shanghai"\n'
+             '  changed_when: false\n'
+             '  become: true\n'),
+            ('- name: Base | render /etc/hostname\n'
+             '  ansible.builtin.template:\n'
+             '    src: templates/hostname.j2\n'
+             '    dest: /etc/hostname\n'
+             '    owner: root\n'
+             '    group: root\n'
+             '    mode: "0644"\n'
+             '  become: true\n'),
+            ('- name: Base | set hostname\n'
+             '  ansible.builtin.hostname:\n'
+             '    name: "{{ inventory_hostname }}"\n'
+             '  become: true\n'),
+            ('- name: Base | update /etc/hosts\n'
+             '  ansible.builtin.template:\n'
+             '    src: templates/hosts\n'
+             '    dest: /etc/hosts\n'
+             '    owner: root\n'
+             '    group: root\n'
+             '    mode: "0644"\n'
+             '  become: true\n'),
+            ('- name: Base | harden ssh\n'
+             '  ansible.builtin.script: files/secure_ssh.sh\n'
+             '  become: true\n'),
+            ('- name: Base | harden ssh config\n'
+             '  ansible.builtin.import_tasks: harden_ssh.yml\n'
+             '  tags: [ssh, security]\n'),
+            ('- name: Base | configure fail2ban\n'
+             '  ansible.builtin.import_tasks: fail2ban.yml\n'
+             '  tags: [fail2ban, security]\n'),
+        ]
+        for block in append_blocks:
+            if block in text and (block + guard) not in text:
+                text = text.replace(block, block + guard, 1)
+        
+        # Tasks that already have a `when:` list -> add the Darwin condition to it.
+        when_blocks = [
+            ('  when:\n'
+             '    - common_security_limits.enabled | default(true) | bool\n'),
+            ('  when:\n'
+             '    - common_firewall.enabled | default(true) | bool\n'),
+        ]
+        extra = "    - ansible_os_family != 'Darwin'\n"
+        for block in when_blocks:
+            if block in text and (block + extra) not in text:
+                text = text.replace(block, block + extra, 1)
+        
+        path.write_text(text)
+
+    patch_2()
+
+    def patch_3():
+        
+        path = Path("roles/vhosts/postgres/tasks/macos.yml")
+        text = path.read_text()
+        old = (
+            "- name: Ensure PostgreSQL 16 is installed via Homebrew\n"
+            "  community.general.homebrew:\n"
+            "    name: postgresql@16\n"
+            "    state: present\n"
+        )
+        new = (
+            "- name: Ensure PostgreSQL 16 is installed via Homebrew\n"
+            "  ansible.builtin.command: brew install postgresql@16\n"
+            "  environment:\n"
+            "    PATH: \"/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}\"\n"
+            "    HOMEBREW_NO_AUTO_UPDATE: \"1\"\n"
+            "  register: postgresql_brew_install\n"
+            "  changed_when: >-\n"
+            "    'already installed' not in (postgresql_brew_install.stderr | default(''))\n"
+            "    and 'already installed' not in (postgresql_brew_install.stdout | default(''))\n"
+            "  failed_when: postgresql_brew_install.rc != 0\n"
+        )
+        if old in text:
+            text = text.replace(old, new, 1)
+            path.write_text(text)
+
+    patch_3()
+
+    def patch_4():
+        
+        path = Path("roles/vhosts/litellm/tasks/main.yml")
+        text = path.read_text()
+        old = (
+            "- name: Install LiteLLM prerequisites (macOS)\n"
+            "  community.general.homebrew:\n"
+            "    name: python@3.13\n"
+            "    state: present\n"
+            "  when: ansible_os_family == 'Darwin'\n"
+        )
+        new = (
+            "- name: Install LiteLLM prerequisites (macOS)\n"
+            "  ansible.builtin.command: brew install python@3.13\n"
+            "  environment:\n"
+            "    PATH: \"/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}\"\n"
+            "    HOMEBREW_NO_AUTO_UPDATE: \"1\"\n"
+            "  register: litellm_brew_python\n"
+            "  changed_when: >-\n"
+            "    'already installed' not in (litellm_brew_python.stderr | default(''))\n"
+            "    and 'already installed' not in (litellm_brew_python.stdout | default(''))\n"
+            "  failed_when: litellm_brew_python.rc != 0\n"
+            "  when: ansible_os_family == 'Darwin'\n"
+        )
+        if old in text:
+            text = text.replace(old, new, 1)
+        
+        # The config dir and env-file tasks hardcode owner/group root, which cannot be
+        # chowned under become=false on macOS. Make ownership OS-conditional (service
+        # user/group on Darwin, root on Linux). The config dir path itself is relocated
+        # to a user-writable location via the litellm_config_dir extra-var.
+        owner_subs = [
+            (
+                '    path: "{{ litellm_config_dir }}"\n'
+                '    state: directory\n'
+                '    owner: root\n'
+                '    group: root\n'
+                '    mode: "0755"\n',
+                '    path: "{{ litellm_config_dir }}"\n'
+                '    state: directory\n'
+                '    owner: "{{ litellm_service_user if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+                '    group: "{{ litellm_service_group if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+                '    mode: "0755"\n',
+            ),
+            (
+                '    dest: "{{ litellm_env_file }}"\n'
+                '    owner: root\n'
+                '    group: root\n'
+                '    mode: "0600"\n',
+                '    dest: "{{ litellm_env_file }}"\n'
+                '    owner: "{{ litellm_service_user if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+                '    group: "{{ litellm_service_group if ansible_os_family == \'Darwin\' else \'root\' }}"\n'
+                '    mode: "0600"\n',
+            ),
+        ]
+        for o, n in owner_subs:
+            if o in text:
+                text = text.replace(o, n, 1)
+        
+        path.write_text(text)
+        
+        # provision-database.yml runs psql with become_user postgres, which has no
+        # equivalent on macOS Homebrew (no postgres system user, no passwordless sudo,
+        # psql off-PATH). On Darwin run without escalation as the current user (the brew
+        # DB superuser) and put the postgresql@16 bin on PATH. Linux unchanged.
+        prov_path = Path("roles/vhosts/litellm/tasks/provision-database.yml")
+        if prov_path.exists():
+            prov = prov_path.read_text()
+            prov_old = (
+                "  args:\n"
+                "    executable: /bin/bash\n"
+                "  become: true\n"
+                "  become_user: \"{{ 'root' if litellm_database_provisioner == 'docker' else 'postgres' }}\"\n"
+            )
+            prov_new = (
+                "  args:\n"
+                "    executable: /bin/bash\n"
+                "  environment:\n"
+                "    PATH: \"/opt/homebrew/opt/postgresql@16/bin:/usr/local/opt/postgresql@16/bin:{{ ansible_env.PATH }}\"\n"
+                "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
+                "  become_user: \"{{ 'root' if litellm_database_provisioner == 'docker' else 'postgres' }}\"\n"
+            )
+            if prov_old in prov:
+                prov = prov.replace(prov_old, prov_new)
+                prov_path.write_text(prov)
+
+    patch_4()
+
+    def patch_5():
+        
+        path = Path("setup-xworkspace-console.yaml")
+        if path.exists():
+            text = path.read_text()
+        
+            # 1. Skip release archive download/validate/install tasks on macOS.
+            download_old = (
+                "    - name: Download XWorkspace Console runtime release\n"
+                "      ansible.builtin.get_url:\n"
+                "        url: \"https://github.com/ai-workspace-lab/xworkspace-console/releases/latest/download/xworkspace-console-runtime-{{ ansible_system | lower }}-{{ 'amd64' if ansible_architecture in ['x86_64', 'amd64'] else 'arm64' }}.tar.gz\"\n"
+                "        dest: \"/tmp/xworkspace-console-runtime.tar.gz\"\n"
+                "        mode: \"0644\"\n"
+                "        force: true\n"
+                "      when: xworkspace_console_runtime_archive | length == 0"
+            )
+            download_new = (
+                "    - name: Download XWorkspace Console runtime release\n"
+                "      ansible.builtin.get_url:\n"
+                "        url: \"https://github.com/ai-workspace-lab/xworkspace-console/releases/latest/download/xworkspace-console-runtime-{{ ansible_system | lower }}-{{ 'amd64' if ansible_architecture in ['x86_64', 'amd64'] else 'arm64' }}.tar.gz\"\n"
+                "        dest: \"/tmp/xworkspace-console-runtime.tar.gz\"\n"
+                "        mode: \"0644\"\n"
+                "        force: true\n"
+                "      when:\n"
+                "        - xworkspace_console_runtime_archive | length == 0\n"
+                "        - ansible_os_family != 'Darwin'"
+            )
+            if download_old in text:
+                text = text.replace(download_old, download_new, 1)
+        
+            validate_old = (
+                "    - name: Validate packaged XWorkspace Console runtime\n"
+                "      ansible.builtin.stat:\n"
+                "        path: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+                "      register: xworkspace_console_runtime_archive_stat"
+            )
+            validate_new = (
+                "    - name: Validate packaged XWorkspace Console runtime\n"
+                "      ansible.builtin.stat:\n"
+                "        path: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+                "      register: xworkspace_console_runtime_archive_stat\n"
+                "      when: ansible_os_family != 'Darwin'"
+            )
+            if validate_old in text and (validate_old + "\n      when:") not in text:
+                text = text.replace(validate_old, validate_new, 1)
+        
+            require_old = (
+                "    - name: Require packaged XWorkspace Console runtime\n"
+                "      ansible.builtin.assert:\n"
+                "        that:\n"
+                "          - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+                "        fail_msg: \"A valid XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE is required or download failed.\""
+            )
+            require_new = (
+                "    - name: Require packaged XWorkspace Console runtime\n"
+                "      ansible.builtin.assert:\n"
+                "        that:\n"
+                "          - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+                "        fail_msg: \"A valid XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE is required or download failed.\"\n"
+                "      when: ansible_os_family != 'Darwin'"
+            )
+            if require_old in text and (require_old + "\n      when:") not in text:
+                text = text.replace(require_old, require_new, 1)
+        
+            marker_old = (
+                "    - name: Inspect installed XWorkspace Console runtime marker\n"
+                "      ansible.builtin.slurp:\n"
+                "        path: \"{{ xworkspace_console_runtime_marker }}\"\n"
+                "      register: xworkspace_console_runtime_marker_content\n"
+                "      failed_when: false"
+            )
+            marker_new = (
+                "    - name: Inspect installed XWorkspace Console runtime marker\n"
+                "      ansible.builtin.slurp:\n"
+                "        path: \"{{ xworkspace_console_runtime_marker }}\"\n"
+                "      register: xworkspace_console_runtime_marker_content\n"
+                "      failed_when: false\n"
+                "      when: ansible_os_family != 'Darwin'"
+            )
+            if marker_old in text and (marker_old + "\n      when:") not in text:
+                text = text.replace(marker_old, marker_new, 1)
+        
+            install_old = (
+                "    - name: Install packaged XWorkspace Console runtime\n"
+                "      ansible.builtin.unarchive:\n"
+                "        src: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+                "        dest: \"{{ xworkspace_console_repo_dir | dirname }}\"\n"
+                "        remote_src: true\n"
+                "        owner: \"{{ xworkspace_console_user }}\"\n"
+                "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+                "      when:\n"
+                "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+                "        - >-\n"
+                "          (xworkspace_console_runtime_marker_content.content | default('') | b64decode | trim)\n"
+                "          != (xworkspace_console_runtime_archive_stat.stat.checksum | default(''))\n"
+                "          or not (xworkspace_console_api_binary is file)\n"
+                "          or not ((xworkspace_console_dashboard_dir ~ '/dist/index.html') is file)"
+            )
+            install_new = (
+                "    - name: Install packaged XWorkspace Console runtime\n"
+                "      ansible.builtin.unarchive:\n"
+                "        src: \"{{ xworkspace_console_runtime_archive_resolved }}\"\n"
+                "        dest: \"{{ xworkspace_console_repo_dir | dirname }}\"\n"
+                "        remote_src: true\n"
+                "        owner: \"{{ xworkspace_console_user }}\"\n"
+                "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+                "      when:\n"
+                "        - ansible_os_family != 'Darwin'\n"
+                "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)\n"
+                "        - >-\n"
+                "          (xworkspace_console_runtime_marker_content.content | default('') | b64decode | trim)\n"
+                "          != (xworkspace_console_runtime_archive_stat.stat.checksum | default(''))\n"
+                "          or not (xworkspace_console_api_binary is file)\n"
+                "          or not ((xworkspace_console_dashboard_dir ~ '/dist/index.html') is file)"
+            )
+            if install_old in text:
+                text = text.replace(install_old, install_new, 1)
+        
+            record_old = (
+                "    - name: Record installed XWorkspace Console runtime checksum\n"
+                "      ansible.builtin.copy:\n"
+                "        dest: \"{{ xworkspace_console_runtime_marker }}\"\n"
+                "        owner: \"{{ xworkspace_console_user }}\"\n"
+                "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+                "        mode: \"0644\"\n"
+                "        content: \"{{ xworkspace_console_runtime_archive_stat.stat.checksum }}\\n\"\n"
+                "      when:\n"
+                "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)"
+            )
+            record_new = (
+                "    - name: Record installed XWorkspace Console runtime checksum\n"
+                "      ansible.builtin.copy:\n"
+                "        dest: \"{{ xworkspace_console_runtime_marker }}\"\n"
+                "        owner: \"{{ xworkspace_console_user }}\"\n"
+                "        group: \"{{ 'staff' if ansible_os_family == 'Darwin' else xworkspace_console_user }}\"\n"
+                "        mode: \"0644\"\n"
+                "        content: \"{{ xworkspace_console_runtime_archive_stat.stat.checksum }}\\n\"\n"
+                "      when:\n"
+                "        - ansible_os_family != 'Darwin'\n"
+                "        - xworkspace_console_runtime_archive_stat.stat.exists | default(false)"
+            )
+            if record_old in text:
+                text = text.replace(record_old, record_new, 1)
+        
+            # 2. Inject Clone and Build tasks on macOS (Darwin).
+            anchor = "    - name: Deploy AI Workspace portal service configuration"
+            injected_tasks = (
+                "    - name: Check if xworkspace-console repo already exists (macOS)\n"
+                "      ansible.builtin.stat:\n"
+                "        path: \"{{ xworkspace_console_repo_dir }}/.git\"\n"
+                "      register: xworkspace_console_git_stat_macos\n"
+                "      when: ansible_os_family == 'Darwin'\n"
+                "\n"
+                "    - name: Clone xworkspace-console repository (macOS)\n"
+                "      ansible.builtin.git:\n"
+                "        repo: \"{{ xworkspace_console_source_repo }}\"\n"
+                "        dest: \"{{ xworkspace_console_repo_dir }}\"\n"
+                "        version: \"{{ xworkspace_console_source_version }}\"\n"
+                "        depth: 1\n"
+                "      become_user: \"{{ xworkspace_console_user }}\"\n"
+                "      when:\n"
+                "        - ansible_os_family == 'Darwin'\n"
+                "        - not (xworkspace_console_git_stat_macos.stat.exists | default(false))\n"
+                "\n"
+                "    - name: Build dashboard assets on target (macOS)\n"
+                "      ansible.builtin.shell: |\n"
+                "        set -euo pipefail\n"
+                "        cd \"{{ xworkspace_console_dashboard_dir }}\"\n"
+                "        source_commit=\"$(git -C \"{{ xworkspace_console_repo_dir }}\" rev-parse HEAD)\"\n"
+                "        marker=\".ai-workspace-build-commit\"\n"
+                "        if [ -f \"dist/index.html\" ] && [ \"$(cat \"$marker\" 2>/dev/null || true)\" = \"$source_commit\" ]; then\n"
+                "          echo \"build=unchanged\"\n"
+                "          exit 0\n"
+                "        fi\n"
+                "        npm install && npm run build\n"
+                "        printf '%s\\n' \"$source_commit\" > \"$marker\"\n"
+                "        echo \"build=changed\"\n"
+              "      args:\n"
+                "        executable: /bin/bash\n"
+                "      become_user: \"{{ xworkspace_console_user }}\"\n"
+                "      register: xworkspace_console_dashboard_build_macos\n"
+                "      changed_when: \"'build=changed' in (xworkspace_console_dashboard_build_macos.stdout | default(''))\"\n"
+                "      when: ansible_os_family == 'Darwin'\n"
+                "\n"
+            )
+            if anchor in text and "Clone xworkspace-console repository (macOS)" not in text:
+                text = text.replace(anchor, injected_tasks + anchor, 1)
+        
+            path.write_text(text)
+        
+        # Patch xworkspace_console_macos.yml to ensure LaunchAgents directory exists
+        macos_path = Path("xworkspace_console_macos.yml")
+        if macos_path.exists():
+            macos_text = macos_path.read_text()
+            launchagents_task = (
+                "- name: Ensure macOS LaunchAgents directory exists\n"
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ ansible_env.HOME }}/Library/LaunchAgents\"\n"
+                "    state: directory\n"
+                "    mode: \"0755\"\n\n"
+            )
+            if "Ensure macOS LaunchAgents directory exists" not in macos_text:
+                if macos_text.startswith("---\n"):
+                    macos_text = "---\n" + launchagents_task + macos_text[4:]
+                else:
+                    macos_text = launchagents_task + macos_text
+                macos_path.write_text(macos_text)
+
+    patch_5()
+
+    def patch_6():
+        
+        path = Path("roles/vhosts/gateway_openclaw/tasks/main.yml")
+        if path.exists():
+            text = path.read_text()
+            
+            download_old = (
+                "- name: Download OpenClaw Multi-Session Plugins offline archive\n"
+                "  ansible.builtin.get_url:\n"
+                "    url: \"{{ gateway_openclaw_multi_session_plugin_archive_url }}\"\n"
+                "    dest: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+                "    mode: \"0644\""
+            )
+            download_new = (
+                "- name: Download OpenClaw Multi-Session Plugins offline archive\n"
+                "  ansible.builtin.get_url:\n"
+                "    url: \"{{ gateway_openclaw_multi_session_plugin_archive_url }}\"\n"
+                "    dest: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+                "    mode: \"0644\"\n"
+                "  when: ansible_os_family != 'Darwin'"
+            )
+            if download_old in text:
+                text = text.replace(download_old, download_new, 1)
+        
+            extract_old = (
+                "- name: Extract OpenClaw Multi-Session Plugins\n"
+                "  ansible.builtin.unarchive:\n"
+                "    src: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+                "    dest: \"{{ gateway_openclaw_home }}/.openclaw/extensions\"\n"
+                "    remote_src: true\n"
+                "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
+                "    group: \"{{ gateway_openclaw_service_group }}\"\n"
+                "    mode: \"0755\"\n"
+                "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
+                "  notify: Restart openclaw"
+            )
+            extract_new = (
+                "- name: Extract OpenClaw Multi-Session Plugins\n"
+                "  ansible.builtin.unarchive:\n"
+                "    src: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
+                "    dest: \"{{ gateway_openclaw_home }}/.openclaw/extensions\"\n"
+                "    remote_src: true\n"
+                "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
+                "    group: \"{{ gateway_openclaw_service_group }}\"\n"
+                "    mode: \"0755\"\n"
+                "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
+                "  notify: Restart openclaw\n"
+                "  when: ansible_os_family != 'Darwin'"
+            )
+            if extract_old in text:
+                text = text.replace(extract_old, extract_new, 1)
+        
+            anchor = "- name: Ensure OpenClaw global plugin npm directory exists"
+            injected = (
+                "- name: Check if openclaw-multi-session-plugins repo exists (macOS)\n"
+                "  ansible.builtin.stat:\n"
+                "    path: \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}/.git\"\n"
+                "  register: openclaw_plugin_git_stat_macos\n"
+                "  when: ansible_os_family == 'Darwin'\n"
+                "\n"
+                "- name: Clone openclaw-multi-session-plugins repository (macOS)\n"
+                "  ansible.builtin.git:\n"
+                "    repo: \"https://github.com/ai-workspace-lab/openclaw-multi-session-plugins.git\"\n"
+                "    dest: \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}\"\n"
+                "    version: main\n"
+                "    depth: 1\n"
+                "  become_user: \"{{ gateway_openclaw_service_user }}\"\n"
+                "  when:\n"
+                "    - ansible_os_family == 'Darwin'\n"
+                "    - not (openclaw_plugin_git_stat_macos.stat.exists | default(false))\n"
+                "\n"
+                "- name: Build openclaw-multi-session-plugins (macOS)\n"
+                "  ansible.builtin.shell: |\n"
+                "    set -euo pipefail\n"
+                "    cd \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}\"\n"
+                "    npm install && npm run build\n"
+                "  args:\n"
+                "    executable: /bin/bash\n"
+                "  become_user: \"{{ gateway_openclaw_service_user }}\"\n"
+                "  when: ansible_os_family == 'Darwin'\n"
+                "\n"
+                "- name: Link openclaw-multi-session-plugins to extensions (macOS)\n"
+                "  ansible.builtin.file:\n"
+                "    src: \"{{ gateway_openclaw_multi_session_plugin_dir | default('/tmp/openclaw-multi-session-plugins') }}\"\n"
+                "    dest: \"{{ gateway_openclaw_home }}/.openclaw/extensions/openclaw-multi-session-plugins\"\n"
+                "    state: link\n"
+                "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
+                "    group: \"{{ gateway_openclaw_service_group }}\"\n"
+                "  become_user: \"{{ gateway_openclaw_service_user }}\"\n"
+                "  when: ansible_os_family == 'Darwin'\n"
+                "  notify: Restart openclaw\n"
+                "\n"
+            )
+            if anchor in text and "Clone openclaw-multi-session-plugins repository (macOS)" not in text:
+                text = text.replace(anchor, injected + anchor, 1)
+        
+            path.write_text(text)
+
+    patch_6()
+
+if __name__ == '__main__':
+    main()
