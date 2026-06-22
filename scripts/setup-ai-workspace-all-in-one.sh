@@ -7,6 +7,17 @@ set -euo pipefail
 # Usage:
 #   curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
 #
+# Subcommands (pass as the first argument, e.g. `... | bash -s -- uninstall`):
+#   uninstall          Stop & remove all AI Workspace apps/services (launchd
+#                      agents on macOS; systemd units + docker containers on
+#                      Linux). Config, tokens and data under $HOME are KEPT.
+#   uninstall --purge  Same teardown, then DELETE config/state/token/cache dirs
+#                      (e.g. ~/.config/xworkspace, ~/.local/state/xworkspace,
+#                      ~/.openclaw, ~/.ai_workspace_auth_token, /tmp/ai-workspace-deploy;
+#                      plus /opt/ai-workspace & /etc/ai-workspace on Linux when
+#                      root is available). Both forms print a plan up front and
+#                      report each path as removed / absent.
+#
 # Supported Environment Variables:
 #   AI_WORKSPACE_SECURITY_LEVEL
 #   LITELLM_API_CADDY_STRICT_WHITELIST
@@ -1573,11 +1584,97 @@ if [ "${AI_WORKSPACE_LIBRARY_MODE:-false}" = "true" ]; then
     exit 0
 fi
 
+# --- Uninstall inventory (single source of truth for summary + teardown) ------
+# Kept as space-separated strings (none of the paths contain spaces) so the
+# lists iterate cleanly under macOS' stock bash 3.2 as well as bash 5.
+darwin_launch_services="api console litellm openclaw vault ttyd bridge qmd hermes"
+linux_systemd_services="xworkspace-litellm xworkspace-qmd xworkspace-api xworkspace-console xworkspace-openclaw xworkmate-bridge xworkspace-ttyd vault postgresql xworkspace-hermes"
+linux_docker_containers="vault litellm db ai-workspace-console xworkmate-bridge qmd openclaw hermes xworkspace-ttyd"
+
+# Paths deleted by --purge. common_* applies to both OSes; the linux_* entries
+# are Linux-only (user systemd units glob + system dirs that need root).
+uninstall_common_purge_paths="$HOME/.config/xworkspace $HOME/.local/state/xworkspace $HOME/.ai_workspace_auth_token $HOME/.vault_password $HOME/.openclaw /tmp/xworkspace-core-skills /tmp/xworkmate-bridge /tmp/ai-workspace-deploy"
+uninstall_linux_user_purge_globs="$HOME/.config/systemd/user/plus.svc.xworkspace.*"
+uninstall_linux_root_purge_paths="/opt/ai-workspace /etc/ai-workspace"
+
+# Delete $1 (a path or glob) if present, printing the action either way so the
+# user can see exactly what purge touched. $2="root" routes rm through sudo.
+purge_path() {
+    local target=$1 mode=${2:-user} found=false p
+    for p in $target; do
+        if [ -e "$p" ] || [ -L "$p" ]; then
+            found=true
+            info "  removed:           $p"
+            if [ "$mode" = "root" ]; then
+                run_as_root rm -rf "$p" >/dev/null 2>&1 || true
+            else
+                rm -rf "$p" || true
+            fi
+        fi
+    done
+    [ "$found" = "true" ] || info "  absent (skipped):  $target"
+}
+
+# Pre-flight: report whether a purge target currently exists, without deleting.
+print_path_status() {
+    local target=$1 found=false p
+    for p in $target; do
+        if [ -e "$p" ] || [ -L "$p" ]; then
+            found=true
+            info "    [present] $p"
+        fi
+    done
+    [ "$found" = "true" ] || info "    [absent]  $target"
+}
+
+# Print, before doing anything destructive, what uninstall will tear down and
+# (when --purge is set) which paths it will delete.
+print_uninstall_summary() {
+    local purge=$1 svc c p
+    info "================ AI Workspace uninstall plan ================"
+    if [ "$(detect_os)" = "darwin" ]; then
+        info "Target OS: macOS (launchd user agents under ~/Library/LaunchAgents)"
+        info "Apps/services to stop & remove (plus.svc.xworkspace.<svc>.plist):"
+        for svc in $darwin_launch_services; do
+            info "  - $svc"
+        done
+        info "Managed PIDs to stop: xworkspace-api, xworkspace-console"
+    else
+        info "Target OS: Linux (systemd units + docker containers)"
+        info "Systemd services to stop, disable & remove (user + system scope):"
+        for svc in $linux_systemd_services; do
+            info "  - $svc"
+        done
+        info "Docker containers to stop & remove (when docker is present):"
+        for c in $linux_docker_containers; do
+            info "  - $c"
+        done
+    fi
+    if [ "$purge" = "true" ]; then
+        info "--purge: the following paths will be DELETED (current status shown):"
+        for p in $uninstall_common_purge_paths; do
+            print_path_status "$p"
+        done
+        if [ "$(detect_os)" != "darwin" ]; then
+            print_path_status "$uninstall_linux_user_purge_globs"
+            for p in $uninstall_linux_root_purge_paths; do
+                print_path_status "$p"
+            done
+        fi
+    else
+        info "--purge NOT set: services are removed but config/tokens/data under"
+        info "  \$HOME are KEPT. Re-run with 'uninstall --purge' to delete them too."
+    fi
+    info "============================================================"
+}
+
 uninstall_ai_workspace() {
-    local purge=false
+    local purge=false p
     if [ "${1:-}" = "--purge" ]; then
         purge=true
     fi
+
+    print_uninstall_summary "$purge"
 
     info "Starting AI Workspace uninstallation..."
 
@@ -1592,14 +1689,9 @@ uninstall_ai_workspace() {
 
         if [ "$purge" = "true" ]; then
             info "Purging AI Workspace data on macOS..."
-            rm -rf "$HOME/.config/xworkspace"
-            rm -rf "$HOME/.local/state/xworkspace"
-            rm -rf "$HOME/.ai_workspace_auth_token"
-            rm -rf "$HOME/.vault_password"
-            rm -rf "$HOME/.openclaw"
-            rm -rf "/tmp/xworkspace-core-skills"
-            rm -rf "/tmp/xworkmate-bridge"
-            rm -rf "/tmp/ai-workspace-deploy"
+            for p in $uninstall_common_purge_paths; do
+                purge_path "$p"
+            done
         fi
     else
         info "Stopping and removing Linux systemd services..."
@@ -1632,18 +1724,14 @@ uninstall_ai_workspace() {
 
         if [ "$purge" = "true" ]; then
             info "Purging AI Workspace data on Linux..."
-            rm -rf "$HOME/.config/xworkspace"
-            rm -rf "$HOME/.local/state/xworkspace"
-            rm -rf "$HOME/.ai_workspace_auth_token"
-            rm -rf "$HOME/.vault_password"
-            rm -rf "$HOME/.openclaw"
-            rm -rf "/tmp/xworkspace-core-skills"
-            rm -rf "/tmp/xworkmate-bridge"
-            rm -rf "/tmp/ai-workspace-deploy"
-            rm -rf "$HOME/.config/systemd/user/plus.svc.xworkspace."*
+            for p in $uninstall_common_purge_paths; do
+                purge_path "$p"
+            done
+            purge_path "$uninstall_linux_user_purge_globs"
             if [ "$(id -u)" = "0" ] || sudo -n true 2>/dev/null; then
-                run_as_root rm -rf "/opt/ai-workspace" >/dev/null 2>&1 || true
-                run_as_root rm -rf "/etc/ai-workspace" >/dev/null 2>&1 || true
+                for p in $uninstall_linux_root_purge_paths; do
+                    purge_path "$p" root
+                done
             fi
         fi
     fi
