@@ -47,7 +47,6 @@ set -euo pipefail
 #   AI_WORKSPACE_PREFETCH_DIR=/var/tmp/ai-workspace-prefetch
 #   AI_WORKSPACE_SPLIT_PHASES=true
 #   AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED=false
-#   AI_WORKSPACE_DARWIN_MODE=local (default on macOS) | ansible
 # ==============================================================================
 
 REPO_URL=${REPO_URL:-"https://github.com/ai-workspace-infra/playbooks.git"}
@@ -1017,82 +1016,6 @@ ensure_secret_file() {
     openssl rand -hex 20 > "$file"
     chmod 600 "$file"
     cat "$file"
-}
-
-write_local_portal_config() {
-    local token=$1
-    local config_dir=$2
-    mkdir -p "$config_dir"
-    cat > "$config_dir/portal-services.json" <<'JSON'
-{
-  "services": [
-    {
-      "key": "litellm",
-      "name": "LiteLLM Admin UI",
-      "url": "http://localhost:${AI_WORKSPACE_LITELLM_PORT}/ui",
-      "openMode": "iframe",
-      "healthUrl": "http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/ui",
-      "description": "Model routing and provider administration.",
-      "icon": "chart",
-      "match": ["litellm", "lite"],
-      "port": ${AI_WORKSPACE_LITELLM_PORT},
-      "role": "model-router"
-    },
-    {
-      "key": "openclaw",
-      "name": "OpenClaw",
-      "url": "http://127.0.0.1:18789/channels",
-      "openMode": "external",
-      "healthUrl": "http://127.0.0.1:18789/channels",
-      "description": "Gateway dashboard.",
-      "icon": "claw",
-      "match": ["openclaw", "gateway"],
-      "port": 18789,
-      "role": "gateway"
-    },
-    {
-      "key": "vault",
-      "name": "Vault Server",
-      "url": "http://127.0.0.1:8200/ui",
-      "openMode": "external",
-      "healthUrl": "http://127.0.0.1:8200/ui",
-      "description": "Vault UI.",
-      "icon": "shield",
-      "match": ["vault"],
-      "port": 8200
-    },
-    {
-      "key": "terminal",
-      "name": "Terminal",
-      "url": "http://127.0.0.1:7681",
-      "openMode": "iframe",
-      "healthUrl": "http://127.0.0.1:7681",
-      "description": "Local ttyd terminal.",
-      "icon": "terminal",
-      "match": ["ttyd", "terminal"],
-      "port": 7681
-    }
-  ]
-}
-JSON
-    printf '%s\n' "$token" > "$config_dir/auth-token"
-    chmod 600 "$config_dir/auth-token"
-    printf '%s\n' "$token" > "$AUTH_TOKEN_FILE"
-    chmod 600 "$AUTH_TOKEN_FILE"
-    cat > "$config_dir/portal.env" <<EOF
-AI_WORKSPACE_AUTH_TOKEN=$token
-XWORKSPACE_CONSOLE_AUTH_TOKEN=$token
-BRIDGE_AUTH_TOKEN=$token
-XWORKMATE_BRIDGE_AUTH_TOKEN=$token
-INTERNAL_SERVICE_TOKEN=$token
-LITELLM_MASTER_KEY=$token
-OPENCLAW_GATEWAY_TOKEN=$token
-VAULT_TOKEN=$token
-VAULT_SERVER_ROOT_ACCESS_TOKEN=$token
-VAULT_ADMIN_PASSWORD=$token
-XWORKSPACE_PORTAL_SERVICES_FILE=$config_dir/portal-services.json
-EOF
-    chmod 600 "$config_dir/portal.env"
 }
 
 stop_managed_pid() {
