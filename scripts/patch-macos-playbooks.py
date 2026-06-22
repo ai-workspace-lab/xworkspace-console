@@ -342,6 +342,17 @@ def main():
         if pip_old in text and pip_new not in text:
             text = text.replace(pip_old, pip_new, 1)
 
+        # `default('{}')` does NOT replace an empty string (only an undefined
+        # value), so when the "Inspect installed LiteLLM dependency versions"
+        # task returns empty stdout (common on a re-run / partial venv),
+        # from_json('') raises and the set_fact fails with a confusing
+        # "args could not be converted to dict" error. Use default(..., true)
+        # so empty/falsy stdout falls back to '{}'.
+        text = text.replace(
+            "default('{}') | from_json",
+            "default('{}', true) | from_json",
+        )
+
         path.write_text(text)
         
         # provision-database.yml runs psql with become_user postgres, which has no
