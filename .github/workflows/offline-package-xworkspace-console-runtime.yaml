@@ -152,6 +152,27 @@ jobs:
           fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
+      - name: Refresh moving latest-runtime release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Stable download URL for consumers (matches the latest-runtime
+          # convention used by the bridge/qmd/litellm runtimes). The
+          # ai-workspace role's console deployment downloads from
+          #   releases/download/latest-runtime/xworkspace-console-runtime-<os>-<arch>.tar.gz
+          tag="latest-runtime"
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" dist/*.tar.gz dist/SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${tag}" dist/*.tar.gz dist/SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "XWorkspace Console runtime (latest)" \
+              --notes "Moving alias to the newest console runtime build (cross-compiled Go API + universal dashboard dist). Targets: darwin-arm64, linux-amd64, linux-arm64."
+          fi
+
   build-offline-package:
     name: Build offline ${{ matrix.distro }}-${{ matrix.version }}-${{ matrix.arch }}
     needs: publish
