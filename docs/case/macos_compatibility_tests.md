@@ -177,6 +177,112 @@
 | **修复方案** | 改 `ansible.builtin.command: brew install python@3.13` + `environment.PATH` 前置 `/opt/homebrew/bin:/usr/local/bin` + `HOMEBREW_NO_AUTO_UPDATE=1`。真实仓库已改；clone 路径由 `patch_playbook_litellm_macos()` 同步补丁 |
 | **备注** | litellm 后续仍有 macOS 缺口待逐个处理：`/root` 派生的 salt/db 密钥 assert、`/etc/litellm` 配置目录、`become: true` + `become_user` 的 pip/prisma 任务（服务用户在 macOS 未创建）、DB provisioning 等 |
 
+## 当前进展快照（2026-06-22）
+
+当前 macOS 调试入口仍以公开安装命令为准：
+
+```bash
+curl -sfL https://install.svc.plus/ai-workspace | bash -
+```
+
+截至 2026-06-22，`xworkspace-console` 的 bootstrap 入口、`playbooks` 的 all-in-one role 链路、`ai-workspace-services/litellm` 的 runtime 发布链路已经形成三仓库协同。macOS 本地部署已越过早期路径、权限、Homebrew、Vault、PostgreSQL、OpenClaw、QMD 等阻塞点，当前主要剩余风险集中在 LiteLLM 依赖安装的网络稳定性、离线 runtime release 的产物验证，以及最终连续两次幂等部署。
+
+已推送到 `ai-workspace-infra/playbooks` 的关键提交：
+
+| Commit | 主题 | 对 macOS 部署的影响 |
+|---|---|---|
+| `09a39e6` | `perf(openclaw): avoid unnecessary doctor repairs` | 将 OpenClaw doctor 与 restart 拆开，避免普通 restart 触发 `doctor --fix --force` |
+| `f01e0bb` | `fix(qmd): provision macOS LaunchAgent` | 为 QMD 补用户级 LaunchAgent，支持 macOS 下启动 MCP 服务 |
+| `c11f51b` | `fix(openclaw): allow version-matched acpx plugin` | 兼容版本匹配的 `acpx` 插件，避免插件注册表 assert 误杀 |
+| `71ebe64` | `fix(litellm): isolate runtime in Python 3.13 venv` | LiteLLM 改为 Python 3.13 venv 隔离，避免 Python 3.13/3.14 混用 |
+| `6a2f05f` | `fix(litellm): skip redundant dependency installs` | 增加包探测和安装标记，重复执行时跳过已满足的 LiteLLM 依赖安装 |
+
+已推送到 `ai-workspace-services/litellm` 的关键提交：
+
+| Commit | 主题 | 对 macOS/离线部署的影响 |
+|---|---|---|
+| `51cde5e32` | `ci: add offline litellm runtime workflow` | 新增 `.github/workflows/offline-package-litellm-runtime.yaml`，产出 `litellm-runtime-<distro>-<version>-<arch>.tar.gz`，供 console 离线包脚本消费 |
+
+当前仍需用一次干净安装验证 `install.svc.plus` 指向的远端脚本是否已经包含最新 bootstrap 逻辑。如果失败点仍显示旧任务或旧路径，应先确认发布入口是否已经同步到 `ai-workspace-lab/xworkspace-console@main` 最新版本。
+
+## TC-MAC-020: OpenClaw doctor 过重导致 handler 慢
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/gateway_openclaw/handlers/main.yml` |
+| **触发现象** | `RUNNING HANDLER [roles/vhosts/gateway_openclaw/ : Repair OpenClaw health findings (POSIX)]` 耗时约 5-6 秒；此前 restart 与 doctor 绑定，普通配置变化也可能触发 `openclaw doctor --fix --force --yes` |
+| **根因** | handler 将“轻量 restart”和“doctor repair”耦合，且 `--fix --force` 默认做修复路径，适合真实健康问题，不适合每次部署收口都跑 |
+| **修复方案** | `playbooks` 中已拆分 doctor 与 restart：日常只做 lightweight restart；只有 package/config/plugin 等实际变化才触发 doctor；优先使用较轻的检查/repair 模式，减少无关变化把 doctor 拉起来 |
+| **验证状态** | 已提交 `09a39e6`。仍需在完整 macOS 部署中观察 OpenClaw handler 是否只在真实变更时触发 |
+
+## TC-MAC-021: QMD 缺 macOS LaunchAgent
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/qmd/` |
+| **触发现象** | QMD MCP 端口 `http://localhost:8181/mcp` 需要作为 macOS 用户服务运行，但 role 缺少 launchd provisioning |
+| **根因** | Linux/systemd 路径已有服务管理，macOS 缺少 `LaunchAgents/plus.svc.xworkspace.qmd.plist` 等用户级服务描述 |
+| **修复方案** | 新增 QMD LaunchAgent：`plus.svc.xworkspace.qmd`，以 macOS 用户级服务方式启动 |
+| **验证状态** | 已提交 `f01e0bb`。仍需在完整安装后验证 `launchctl` 状态与 `http://localhost:8181/mcp` 可达 |
+
+## TC-MAC-022: OpenClaw Codex 插件兼容性 assert 误杀
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/gateway_openclaw/tasks/main.yml` |
+| **触发报错** | `Assert OpenClaw Codex plugin matches gateway version` 失败，提示必须运行 `@openclaw/codex 2026.6.1` 与 `openclaw-multi-session-plugins 2026.6.1`，并且不得保留 stale global `@openclaw/acpx` |
+| **根因** | assert 将 `acpx` 一律视为 stale，但当前 OpenClaw 插件注册表可能包含版本匹配的 `acpx`，应检查版本而非只检查存在性 |
+| **修复方案** | 调整 assert：允许 version-matched `acpx`，仅拒绝 stale/global 不匹配版本 |
+| **验证状态** | 已提交 `c11f51b`。仍需在全量部署中观察插件注册表刷新后 assert 结果 |
+
+## TC-MAC-023: LiteLLM Python 3.13/3.14 混用
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/litellm/defaults/main.yml`、`roles/vhosts/litellm/tasks/main.yml` |
+| **触发现象** | macOS 上 Homebrew Python 与系统/其它 Python 版本混用，LiteLLM 依赖可能被装进不一致的解释器或 site-packages，后续 `prisma generate` 与服务启动不稳定 |
+| **根因** | 早期安装路径没有强制独立 venv，且 macOS 环境里可能同时存在 Python 3.13、3.14 |
+| **修复方案** | LiteLLM runtime 固定使用 Python 3.13 创建隔离 venv：`~/.local/share/litellm/venv`；`pip`、`litellm`、`prisma` 均从该 venv 执行 |
+| **验证状态** | 已提交 `71ebe64`。仍需完整部署验证服务启动和 `prisma generate` |
+
+## TC-MAC-024: LiteLLM 依赖安装慢且公网下载易中断
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `roles/vhosts/litellm/tasks/main.yml`、`roles/vhosts/litellm/defaults/main.yml` |
+| **触发报错** | `Ensure LiteLLM and DB dependencies are installed` 最长耗时约 581 秒，随后因 `IncompleteRead` / `curl 18` / GitHub archive 或 PyPI wheel 下载中断失败 |
+| **根因** | `litellm[proxy]` 依赖树大，包含 `polars-runtime-32`、`cryptography`、`boto3`、`mcp` 等大量包；直接在线 `pip install` 既慢又依赖网络稳定性。将 `git+https` 改为 GitHub archive 后解决了 git clone EOF，但仍无法避免大 wheel 下载中断 |
+| **已修复** | ① 默认安装源由 `git+https` 改为 GitHub archive；② 增加 `PIP_CACHE_DIR` 和更长 timeout；③ 安装前探测已装 `litellm/prisma/psycopg2-binary`，并用 `.install-spec` 标记跳过重复安装；④ 新增 `ai-workspace-services/litellm` 的 offline runtime workflow，预构建目标发行版 wheelhouse |
+| **当前状态** | 在线安装路径已缓解但未根除网络风险；真正的长期解法是让 all-in-one 优先消费 `litellm-runtime-<distro>-<version>-<arch>.tar.gz` 中的 wheelhouse |
+| **待验证** | 需要触发并确认 `offline-package-litellm-runtime.yaml` 在 GitHub Actions 生成 release，且 `xworkspace-console/scripts/create-ai-workspace-offline-package.sh` 能拉取 `ai-workspace-services/litellm` 的 matching runtime asset |
+
+## TC-MAC-025: LiteLLM runtime release 与 all-in-one 离线包对接
+
+| 项目 | 内容 |
+|------|------|
+| **触发文件** | `ai-workspace-services/litellm/.github/workflows/offline-package-litellm-runtime.yaml`、`xworkspace-console/scripts/create-ai-workspace-offline-package.sh`、`xworkspace-console/scripts/ai-workspace-offline-install.sh` |
+| **契约** | console 离线包脚本会下载 `LITELLM_RUNTIME_RELEASE_REPO=ai-workspace-services/litellm` 下的 `litellm-runtime-${DISTRO_ID}-${DISTRO_VERSION}-${ARCH}.tar.gz`，解包后复制 `packages/pip`、可选 `packages/python`、`metadata/runtime.env` |
+| **已完成** | `litellm` 仓库新增 workflow，矩阵覆盖 Debian 11/12/13 与 Ubuntu 22.04/24.04/26.04 的 amd64/arm64；Ubuntu 26.04 额外打包 portable Python 3.13.14；release 中合并 SHA256SUMS |
+| **待处理** | 需要检查 GitHub Actions 实际 run 是否成功；需要确认 release tag 命名与 console 侧 `latest-runtime` 解析一致；需要在离线 all-in-one 包里实测 `metadata/litellm-runtime.env` 是否正确注入 `LITELLM_PACKAGE_SPEC` |
+
+## TC-MAC-026: uninstall purge 需要打印删除路径
+
+| 项目 | 内容 |
+|------|------|
+| **触发命令** | `curl -sfL https://install.svc.plus/ai-workspace \| bash -s -- uninstall purge` |
+| **需求** | purge 模式不仅删除本地状态，还要明确打印将删除/已删除的路径，便于用户确认清理范围 |
+| **当前状态** | 已识别为待处理项；需要在 `setup-ai-workspace-all-in-one.sh` 的 uninstall/purge 分支中抽出统一 `purge_path` / `purge_matching_paths` helper，删除前输出存在路径，不存在时也输出 skipped/absent |
+| **涉及路径** | macOS 至少包括 `~/.ai_workspace_auth_token`、`~/.vault_password`、`~/.openclaw`、`/tmp/xworkspace-core-skills`、`/tmp/xworkmate-bridge`、`/tmp/ai-workspace-deploy`；Linux 还包括 `/opt/ai-workspace`、`/etc/ai-workspace`、用户 systemd unit 等 |
+
+## TC-MAC-027: 非源码正式目录清理
+
+| 项目 | 内容 |
+|------|------|
+| **触发现象** | 工作区出现类似 `ai-workspace-all-in-one-offline-ubuntu-22.04-amd64/` 的生成目录 |
+| **根因** | 离线包构建/解包产物进入了开发工作区，容易被误认为源码目录 |
+| **处理原则** | 不属于源码仓库正式目录的生成产物应从工作区清理；离线包输出应放在明确的 `dist/`、release artifact 或临时目录中，不应混入源码根目录 |
+| **待处理** | 后续需要补一次仓库级清扫：确认 `xworkspace-console`、`playbooks`、`litellm` 各自 `git status --ignored`，清理未跟踪离线包目录，并按需要补 `.gitignore` |
+
 ---
 
 ## 修复维度总结
@@ -193,3 +299,9 @@
 | 包管理器绕过 (skip apt on Darwin) | TC-008, TC-010 |
 | 模板变量解耦 (remove nvm/nodejs_version) | TC-005 |
 | 路径空格兼容 (argv vs string) | TC-011 |
+| Homebrew 模块绕过 (command brew + PATH) | TC-018, TC-019 |
+| macOS launchd 用户服务 | TC-021 |
+| handler 触发条件收敛 | TC-020 |
+| Python venv 隔离与 pip 缓存 | TC-023, TC-024 |
+| 离线 runtime wheelhouse | TC-025 |
+| purge 可观测性 | TC-026 |
