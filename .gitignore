@@ -52,3 +52,4 @@ coverage/
 /dashboard/.ai-workspace-build-commit
 *.textClipping
 
+scripts/__pycache__/

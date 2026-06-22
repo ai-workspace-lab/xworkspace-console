@@ -316,7 +316,43 @@ def main():
         for o, n in owner_subs:
             if o in text:
                 text = text.replace(o, n, 1)
-        
+
+        # litellm[proxy] pulls large wheels (polars-runtime ~46MB, etc.) that
+        # frequently break mid-stream over slow/mirrored links with
+        # IncompleteRead, failing the whole deploy. Make the online install
+        # resilient: --retries reconnects and --resume-retries (pip >= 25.1,
+        # which the macOS python@3.13 venv already ships) continues a partial
+        # download instead of restarting it. Until the playbooks repo carries
+        # this in the role itself, the curl|bash clone path needs it injected.
+        pip_old = (
+            '    executable: "{{ litellm_pip_executable }}"\n'
+            '    state: present\n'
+            '  environment:\n'
+            '    PIP_CACHE_DIR: "{{ litellm_pip_cache_dir }}"\n'
+            '    PIP_DEFAULT_TIMEOUT: "120"\n'
+        )
+        pip_new = (
+            '    executable: "{{ litellm_pip_executable }}"\n'
+            '    state: present\n'
+            '    extra_args: "--retries 5 --resume-retries 5"\n'
+            '  environment:\n'
+            '    PIP_CACHE_DIR: "{{ litellm_pip_cache_dir }}"\n'
+            '    PIP_DEFAULT_TIMEOUT: "180"\n'
+        )
+        if pip_old in text and pip_new not in text:
+            text = text.replace(pip_old, pip_new, 1)
+
+        # `default('{}')` does NOT replace an empty string (only an undefined
+        # value), so when the "Inspect installed LiteLLM dependency versions"
+        # task returns empty stdout (common on a re-run / partial venv),
+        # from_json('') raises and the set_fact fails with a confusing
+        # "args could not be converted to dict" error. Use default(..., true)
+        # so empty/falsy stdout falls back to '{}'.
+        text = text.replace(
+            "default('{}') | from_json",
+            "default('{}', true) | from_json",
+        )
+
         path.write_text(text)
         
         # provision-database.yml runs psql with become_user postgres, which has no
@@ -577,9 +613,19 @@ def main():
                 "    mode: \"0644\"\n"
                 "  when: ansible_os_family != 'Darwin'"
             )
-            if download_old in text:
+            # Idempotency: download_new contains download_old as a prefix, so a
+            # second pass over an already-patched tree would otherwise append a
+            # second `when:` line (duplicate mapping key -> invalid YAML). Only
+            # apply when the patched form is not already present.
+            if download_old in text and download_new not in text:
                 text = text.replace(download_old, download_new, 1)
-        
+
+            # NOTE: this block must match the upstream Extract task verbatim,
+            # including the `creates:` line and the multi-item `notify:` list
+            # (`Run OpenClaw doctor` + `Restart openclaw`). If it drifts from
+            # upstream the substitution silently no-ops and the Darwin guard is
+            # never added, so the task tries to unarchive a tarball that is never
+            # downloaded on macOS and the OpenClaw step fails.
             extract_old = (
                 "- name: Extract OpenClaw Multi-Session Plugins\n"
                 "  ansible.builtin.unarchive:\n"
@@ -589,23 +635,15 @@ def main():
                 "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
                 "    group: \"{{ gateway_openclaw_service_group }}\"\n"
                 "    mode: \"0755\"\n"
+                "    creates: \"{{ gateway_openclaw_home }}/.openclaw/extensions/openclaw-multi-session-plugins\"\n"
                 "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
-                "  notify: Restart openclaw"
+                "  notify:\n"
+                "    - Run OpenClaw doctor\n"
+                "    - Restart openclaw"
             )
-            extract_new = (
-                "- name: Extract OpenClaw Multi-Session Plugins\n"
-                "  ansible.builtin.unarchive:\n"
-                "    src: \"/tmp/openclaw-multi-session-plugins.tar.gz\"\n"
-                "    dest: \"{{ gateway_openclaw_home }}/.openclaw/extensions\"\n"
-                "    remote_src: true\n"
-                "    owner: \"{{ gateway_openclaw_service_user }}\"\n"
-                "    group: \"{{ gateway_openclaw_service_group }}\"\n"
-                "    mode: \"0755\"\n"
-                "  become: \"{{ ansible_os_family != 'Darwin' }}\"\n"
-                "  notify: Restart openclaw\n"
-                "  when: ansible_os_family != 'Darwin'"
-            )
-            if extract_old in text:
+            extract_new = extract_old + "\n  when: ansible_os_family != 'Darwin'"
+            # Same idempotency guard as the download task above.
+            if extract_old in text and extract_new not in text:
                 text = text.replace(extract_old, extract_new, 1)
         
             anchor = "- name: Ensure OpenClaw global plugin npm directory exists"
