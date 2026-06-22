@@ -32,7 +32,7 @@ export function AppShell() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [remoteMode, setRemoteMode] = useState(true);
   const [portalServicesConfig, setPortalServicesConfig] = useState<PortalService[]>(portalServices);
-  const [authRequired, setAuthRequired] = useState(false);
+  const [authRequired, setAuthRequired] = useState(true);
   const [authStatusLoaded, setAuthStatusLoaded] = useState(false);
   const [authToken, setAuthToken] = useState('');
   const [tokenInput, setTokenInput] = useState('');
@@ -209,14 +209,10 @@ export function AppShell() {
           summary={summary}
           metrics={metrics}
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
-          onLogout={
-            authRequired
-              ? () => {
-                  window.localStorage.removeItem('xworkspace-bridge-token');
-                  window.location.reload();
-                }
-              : undefined
-          }
+          onLogout={() => {
+            window.localStorage.removeItem('xworkspace-bridge-token');
+            window.location.reload();
+          }}
         />
 
         <WorkspaceTabs tabs={tabs} selectedTab={selectedTab} onSelect={setSelectedTab} onClose={closeTab} onAdd={addCustomTab} />
