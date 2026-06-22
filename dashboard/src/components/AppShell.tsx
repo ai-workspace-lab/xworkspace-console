@@ -209,11 +209,14 @@ export function AppShell() {
           summary={summary}
           metrics={metrics}
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
-          onLogout={() => {
-            window.localStorage.removeItem('xworkspace-bridge-token');
-            setAuthToken('');
-            setTokenInput('');
-          }}
+          onLogout={
+            authRequired
+              ? () => {
+                  window.localStorage.removeItem('xworkspace-bridge-token');
+                  window.location.reload();
+                }
+              : undefined
+          }
         />
 
         <WorkspaceTabs tabs={tabs} selectedTab={selectedTab} onSelect={setSelectedTab} onClose={closeTab} onAdd={addCustomTab} />
