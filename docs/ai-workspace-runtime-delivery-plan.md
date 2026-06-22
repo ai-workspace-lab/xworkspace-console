@@ -4,8 +4,8 @@
 >
 > 本文是落地前的详细规划（设计 + 变更清单 + 提交/部署/验收方案）。实现阶段严格按本文执行，不扩大修改范围、不做大规模重构、优先复用现有实现。
 
-- 状态：规划已定稿，待实现
-- 影响仓库：`ai-workspace-infra/playbooks`、`ai-workspace-lab/xworkspace-console`、`ai-workspace-lab/xworkspace-core-skills`
+- 状态：Linux 离线包链路与 macOS 本地校验链路已进入联调阶段；macOS 已越过多数 role 兼容性阻塞，当前重点是 LiteLLM 离线 runtime 接入、完整安装复跑和幂等验收
+- 影响仓库：`ai-workspace-infra/playbooks`、`ai-workspace-lab/xworkspace-console`、`ai-workspace-lab/xworkspace-core-skills`、`ai-workspace-services/qmd`、`ai-workspace-services/litellm`
 - 目标主机：`root@acp-bridge.onwalk.net`
 - 对外默认域名（唯一公开服务）：`acp-bridge.onwalk.net`
 
@@ -14,9 +14,12 @@
 - [x] 等待并核对 `xworkspace-console` 的离线包 GitHub Actions 发布链路，确认 `publish-release` 完整结束且 release 产物上传成功。
 - [ ] 继续核对 `root@acp-bridge.onwalk.net` 的远程部署进度，确认 `setup-ai-workspace-all-in-one.sh` 最终完成并输出统一摘要。
 - [x] `setup-ai-workspace-all-in-one.sh` 在目标主机上优先使用离线安装包加速部署，减少在线拉取与安装耗时。
+- [x] 为 LiteLLM 新增 runtime wheelhouse release workflow，供 all-in-one 离线包消费。
+- [ ] 验证 `ai-workspace-services/litellm` 的 runtime release 实际生成成功，并确认 console 离线包能下载 matching `litellm-runtime-<distro>-<version>-<arch>.tar.gz`。
 - [ ] 验证 `setup-ai-workspace-all-in-one.sh` 幂等性：同一主机连续执行两次均成功，复用凭据、离线包缓存与已导入镜像，并安全等待部署/APT 锁。
-- [ ] 完成最终验收核对：Bridge 对外可达、其余服务默认仅本地监听、`acp-codex` / `opencode` / `gemini` / `hermes` / `qmd` / `litellm` 状态正常。
-- [ ] 记录最终提交哈希与远端验证结果，回填到本计划的交付结果部分。
+- [ ] 完成 macOS 本地最终验收核对：Portal、Bridge、OpenClaw、QMD、Hermes、PostgreSQL、Vault、LiteLLM 状态正常，`http://localhost:8181/mcp` 和 LiteLLM health 可达。
+- [ ] 完成远程 Linux 最终验收核对：Bridge 对外可达、其余服务默认仅本地监听、`acp-codex` / `opencode` / `gemini` / `hermes` / `qmd` / `litellm` 状态正常。
+- [ ] 记录最终提交哈希、GitHub Actions run、release tag 与远端验证结果，回填到本计划的交付结果部分。
 
 ---
 
@@ -325,6 +328,35 @@ setup-ai-workspace-all-in-one.sh            [repo: xworkspace-console/scripts]
 
 > 每个仓库**独立提交**，分别记录 Commit Hash 写入最终交付说明。
 
+### 6.1 当前实现进度（2026-06-22）
+
+| 仓库 | 已完成进展 | 已知待处理 |
+|---|---|---|
+| `ai-workspace-infra/playbooks` | OpenClaw doctor/restart 已拆分；QMD 已补 macOS LaunchAgent；OpenClaw `acpx` 兼容性 assert 已修；LiteLLM 已切 Python 3.13 venv、安装探测和 `.install-spec` 跳过重复安装 | 需要完整 macOS 复跑确认 `qmd :8181/mcp`、OpenClaw registry、LiteLLM health；需要确认 all-in-one 的 macOS patch 与 playbooks main 不再互相覆盖 |
+| `ai-workspace-lab/xworkspace-console` | all-in-one 离线包链路已能消费 console/bridge/qmd/litellm runtime release；macOS 调试案例持续记录在 `docs/case/macos_compatibility_tests.md` | `uninstall purge` 仍需打印删除路径；需要清理离线包生成目录等非源码正式目录；需要确认 `install.svc.plus/ai-workspace` 发布入口同步到最新 main |
+| `ai-workspace-services/qmd` | all-in-one 离线包脚本按 `qmd-runtime-linux-${ARCH}.tar.gz` 消费 release；playbooks 已补 QMD macOS LaunchAgent | 需要确认 latest runtime release 与 offline package 拉取路径持续可用；macOS 需实测 MCP endpoint |
+| `ai-workspace-services/litellm` | 新增 `.github/workflows/offline-package-litellm-runtime.yaml`，产出 `litellm-runtime-<distro>-<version>-<arch>.tar.gz`、wheelhouse、可选 portable Python、`metadata/runtime.env` | 需要触发 GitHub Actions 并确认 release asset 与 `SHA256SUMS`；需要确认 console 离线包使用 `latest-runtime` 能解析到该 release |
+| `ai-workspace-lab/xworkspace-core-skills` | all-in-one 离线包仍按 core-skills repo/ref 打包 | 当前未发现新的 macOS 阻塞；最终验收仍需确认技能注入与 OpenClaw/QMD 可见 |
+
+### 6.2 近期关键提交
+
+| 仓库 | Commit | 说明 |
+|---|---|---|
+| `ai-workspace-infra/playbooks` | `09a39e6` | `perf(openclaw): avoid unnecessary doctor repairs` |
+| `ai-workspace-infra/playbooks` | `f01e0bb` | `fix(qmd): provision macOS LaunchAgent` |
+| `ai-workspace-infra/playbooks` | `c11f51b` | `fix(openclaw): allow version-matched acpx plugin` |
+| `ai-workspace-infra/playbooks` | `71ebe64` | `fix(litellm): isolate runtime in Python 3.13 venv` |
+| `ai-workspace-infra/playbooks` | `6a2f05f` | `fix(litellm): skip redundant dependency installs` |
+| `ai-workspace-services/litellm` | `51cde5e32` | `ci: add offline litellm runtime workflow` |
+
+### 6.3 当前最需要收口的问题
+
+1. `LiteLLM`：在线 `pip install litellm[proxy]` 仍可能因大 wheel 下载中断失败；应以 runtime wheelhouse release 作为 all-in-one 默认加速路径，并保留在线路径为 fallback。
+2. `install.svc.plus/ai-workspace`：需要确认公开短链实际拉到的是 `xworkspace-console@main` 最新脚本，否则 macOS 仍可能运行旧 bootstrap。
+3. `uninstall purge`：需要输出将删除/已删除/不存在的路径，覆盖 macOS 与 Linux 的 token、Vault/OpenClaw 状态、临时部署目录、系统配置目录。
+4. 工作区清理：需要清理 `ai-workspace-all-in-one-offline-*` 等生成目录，避免离线包产物混入源码根目录。
+5. 最终验收：需要在 macOS 上做一次干净安装和一次重复安装，记录各服务端口、LaunchAgent/systemd 状态、health endpoint 与 changed 统计。
+
 ---
 
 ## 7. 部署与验证
@@ -398,8 +430,8 @@ ssh root@acp-bridge.onwalk.net \
 
 1. **所有 `npm -g` 共享同一 prefix → 必须 Phase 1 串行。**
    `roles/vhosts/nodejs` 设 `npm_config_prefix=/usr/local/lib/npm`；Agent CLI（opencode-ai / @google/gemini-cli / @openai/codex / @anthropic-ai/claude-code）、`yarn`、`openclaw@ver` 全部 `npm -g` 到该 prefix。并发会争用同一 `node_modules`/`.staging` 与 npm cache 锁 → **不可并发**。
-2. **LiteLLM 是全局 `pip install` → Phase 1 串行**（非项目内 venv，写系统 site-packages）。修正早期草案中“pip 可 async”的判断。
-3. **真正安全的 Phase 2 候选是“外部 I/O 预取”**：git clone、二进制下载、docker pull、独立目录的前端 build。它们不碰 dpkg/npm-prefix/pip 全局锁，且写入各自独立路径。
+2. **LiteLLM 已改为独立 Python 3.13 venv，但依赖安装仍应串行收口**。它不再写系统 site-packages，但 `pip install litellm[proxy]` 依赖树大、网络失败率高，默认方向应是优先消费离线 wheelhouse，在线 venv 安装仅作 fallback。
+3. **真正安全的 Phase 2 候选是“外部 I/O 预取”**：git clone、二进制下载、docker pull、独立目录的前端 build、runtime release 下载。它们不碰 dpkg/npm-prefix/pip 全局锁，且写入各自独立路径。
 4. **跨 sub-playbook 的并发收益最大处在 Shell 预取层**：11 个步骤由 ansible 顺序导入，play 间难并发；把可并行的 I/O 上提到 bootstrap 的 Phase 2 fork 池（§10.5）预取，ansible 仅消费已就位产物，是收益/风险比最高的定制。
 5. **离线包优先**（呼应 TODO）：已有离线安装包/已导入镜像时，Phase 2 预取应短路跳过，直接复用缓存。
 
@@ -414,7 +446,7 @@ ssh root@acp-bridge.onwalk.net \
 | 5 bridge + ACP | 同步 console；acp_server_* 的全局安装部分 | `xworkmate-go-core` 二进制下载/放置、acp 各自独立工作目录 prepare | 配置渲染、按依赖 `requires acp-*.service` 顺序启动、validation |
 | 6 vault | （systemd 基础准备） | `get_url` vault zip 下载、解压放置 | 配置渲染、systemd/init、health |
 | 7 postgres | Docker 安装、common 基础 | `docker pull` PG 镜像、初始化独立 data 目录 | compose 渲染、`compose up`、health |
-| 8 litellm | apt python3-pip、**全局 pip install litellm** | — | 配置渲染、systemd、health(`:4000/health`) |
+| 8 litellm | apt/Homebrew Python 准备、Python 3.13 venv 创建、离线 wheelhouse 或 fallback pip 安装 | 下载 `litellm-runtime-<distro>-<version>-<arch>.tar.gz`、校验 SHA256、准备 `packages/pip`/`metadata/runtime.env` | 配置渲染、Prisma client generate、systemd/launchd、health(`:4000/health`) |
 | 9 qmd | （bun 运行时安装，全局） | 条件并发：qmd 拉取/`bun install`（隔离于 `~/.bun`，不碰 dpkg） | qmd.env/index.yml 渲染、systemd --user、health(`:8181`) |
 | 11 xfce（可选） | apt 桌面包/xrdp/chrome、`npm -g`/Playwright | — | xrdp 服务 enable/start、会话配置 |
 
@@ -452,7 +484,7 @@ ssh root@acp-bridge.onwalk.net \
 ```
 
 - 收口铁律：任一 Phase 2 产物在**被 Phase 3 消费前**必须 `finished`。
-- dpkg/全局 npm/全局 pip **绝不** `async`（§10.2）。
+- dpkg/全局 npm/全局 pip **绝不** `async`；LiteLLM venv 安装虽然不再是全局 pip，也应在 wheelhouse 准备完成后串行执行，便于失败定位与重试（§10.2）。
 
 ### 10.5 Shell 层动态 fork 并发（≤ CPU 核心数 × 2，预取层）
 
@@ -505,7 +537,7 @@ pipelining = true
 
 - [ ] 优化前后 `ansible-playbook --list-tasks` 任务集合一致（无丢失/合并）。
 - [ ] 每个 `async` 任务都有对应 `async_status` 收口，无悬挂 job。
-- [ ] Phase 1（apt/全局 npm/全局 pip/dpkg）与 Phase 3（daemon-reload/enable/start/health/摘要/清理）仍严格串行。
+- [ ] Phase 1（apt/全局 npm/全局 pip/dpkg、LiteLLM venv 安装）与 Phase 3（daemon-reload/enable/start/health/摘要/清理）仍严格串行。
 - [ ] Phase 2 任务互不写同一文件、不抢同一锁；离线包存在时短路跳过。
 - [ ] 连续两次执行均成功、`changed=0` 幂等行为不变；Shell fork 池失败子任务非零退出且日志可见。
 
