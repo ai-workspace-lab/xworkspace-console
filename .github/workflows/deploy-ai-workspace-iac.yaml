@@ -1,0 +1,282 @@
+name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
+
+# =============================================================================
+# IaC ↔ Ansible 动态 inventory 联动的最终部署流水线（矩阵模式）
+#
+#   provision : 用 vultr-vps/envs/ai-workspace 创建主机（Python+Jinja2 渲染显式
+#               HCL，无 for_each），导出 cmdb.json + inventory.ini，并据此动态
+#               生成下游部署矩阵。
+#   deploy    : 矩阵按主机并行，用 Ansible all-in-one playbook 部署 AI Workspace。
+#   dns       : 部署完成后，依据 inventory 的 service_domains/IP 同步 Cloudflare DNS。
+#
+# 数据契约 cmdb.json 由 ai-workspace-infra 的 generate.py 产出，贯穿三个 job。
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 配置的 Secrets：
+#   VULTR_API_KEY          Vultr API Key（→ TF_VAR_vultr_api_key）
+#   INFRA_REPO_TOKEN       可读 ai-workspace-infra 的 PAT（私有仓库时必需）
+#   ANSIBLE_SSH_KEY        与 hosts.yaml 中公钥配对的 SSH 私钥（连主机用）
+#   CLOUDFLARE_API_TOKEN   Cloudflare DNS 编辑权限 token
+#   DEEPSEEK_API_KEY       \
+#   NVIDIA_API_KEY          > LLM provider keys，注入部署目标
+#   OLLAMA_API_KEY         /
+#   可选（远端 TF state，S3 兼容 / Vultr 对象存储）：
+#   TF_STATE_ENDPOINT TF_STATE_BUCKET TF_STATE_ACCESS_KEY TF_STATE_SECRET_KEY TF_STATE_REGION
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      infra_ref:
+        description: "ai-workspace-infra git ref (iac_modules + playbooks)"
+        required: false
+        default: "main"
+        type: string
+      playbook:
+        description: "部署用的 playbook（相对 playbooks/）"
+        required: false
+        default: "setup-ai-workspace-all-in-one.yml"
+        type: string
+      terraform_action:
+        description: "apply 创建/更新，destroy 销毁"
+        required: false
+        default: "apply"
+        type: choice
+        options: [apply, destroy]
+      run_deploy:
+        description: "provision 后是否执行 Ansible 部署"
+        required: false
+        default: true
+        type: boolean
+      run_dns:
+        description: "部署后是否同步 Cloudflare DNS"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-ai-workspace-iac
+  cancel-in-progress: false
+
+env:
+  INFRA_REPO: ${{ github.repository_owner }}/ai-workspace-infra
+  ENV_DIR: infra/iac_modules/terraform-hcl-standard/vultr-vps/envs/ai-workspace
+  PLAYBOOKS_DIR: infra/playbooks
+
+jobs:
+  # ---------------------------------------------------------------------------
+  provision:
+    name: Provision (terraform + render CMDB)
+    runs-on: ubuntu-latest
+    env:
+      HAS_BACKEND: ${{ secrets.TF_STATE_BUCKET != '' }}
+    outputs:
+      hosts: ${{ steps.matrix.outputs.hosts }}
+      count: ${{ steps.matrix.outputs.count }}
+    steps:
+      - name: Checkout infra (iac_modules + playbooks)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: ${{ github.event.inputs.infra_ref || 'main' }}
+          token: ${{ secrets.INFRA_REPO_TOKEN || github.token }}
+          path: infra
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install render deps
+        run: pip install --quiet pyyaml jinja2
+
+      - name: Configure remote backend (optional)
+        if: ${{ env.HAS_BACKEND == 'true' }}
+        working-directory: ${{ env.ENV_DIR }}
+        run: |
+          set -euo pipefail
+          cat > backend.tf <<'EOF'
+          terraform {
+            backend "s3" {
+              skip_credentials_validation = true
+              skip_region_validation      = true
+              skip_requesting_account_id  = true
+              skip_metadata_api_check     = true
+              force_path_style            = true
+            }
+          }
+          EOF
+
+      - name: generate.py render (YAML -> 显式 HCL + tfvars)
+        working-directory: ${{ env.ENV_DIR }}
+        run: python3 generate.py render
+
+      - name: Terraform init
+        working-directory: ${{ env.ENV_DIR }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.TF_STATE_BUCKET }}" ]; then
+            terraform init -input=false \
+              -backend-config="endpoint=${{ secrets.TF_STATE_ENDPOINT }}" \
+              -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+              -backend-config="key=ai-workspace/terraform.tfstate" \
+              -backend-config="region=${{ secrets.TF_STATE_REGION || 'us-east-1' }}"
+          else
+            echo "::warning::未配置远端 state，使用本地 state（仅适合一次性演示，destroy 需同一次运行）"
+            terraform init -input=false
+          fi
+
+      - name: Terraform ${{ github.event.inputs.terraform_action || 'apply' }}
+        working-directory: ${{ env.ENV_DIR }}
+        env:
+          TF_VAR_vultr_api_key: ${{ secrets.VULTR_API_KEY }}
+        run: |
+          set -euo pipefail
+          terraform ${{ github.event.inputs.terraform_action || 'apply' }} -auto-approve -input=false
+
+      - name: generate.py inventory (terraform output + YAML -> cmdb.json + inventory.ini)
+        if: ${{ (github.event.inputs.terraform_action || 'apply') == 'apply' }}
+        working-directory: ${{ env.ENV_DIR }}
+        run: python3 generate.py inventory
+
+      - name: Build deploy matrix from cmdb.json
+        id: matrix
+        if: ${{ (github.event.inputs.terraform_action || 'apply') == 'apply' }}
+        working-directory: ${{ env.ENV_DIR }}
+        run: |
+          set -euo pipefail
+          hosts="$(jq -c 'keys' cmdb.json)"
+          echo "hosts=${hosts}" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq 'length' cmdb.json)" >> "$GITHUB_OUTPUT"
+          echo "matrix hosts: ${hosts}"
+
+      - name: Upload CMDB + inventory artifact
+        if: ${{ (github.event.inputs.terraform_action || 'apply') == 'apply' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-workspace-cmdb
+          path: |
+            ${{ env.ENV_DIR }}/cmdb.json
+            ${{ env.ENV_DIR }}/inventory.ini
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy ${{ matrix.host }}
+    needs: provision
+    if: ${{ needs.provision.outputs.count != '0' && (github.event.inputs.run_deploy == 'true' || github.event.inputs.run_deploy == null) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ fromJSON(needs.provision.outputs.hosts) }}
+    steps:
+      - name: Checkout infra (playbooks)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: ${{ github.event.inputs.infra_ref || 'main' }}
+          token: ${{ secrets.INFRA_REPO_TOKEN || github.token }}
+          path: infra
+
+      - name: Download CMDB + inventory
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-workspace-cmdb
+          path: cmdb
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install --quiet ansible
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.ANSIBLE_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Wait for host SSH
+        run: |
+          set -euo pipefail
+          ip="$(jq -r '.["${{ matrix.host }}"].ip' cmdb/cmdb.json)"
+          echo "Waiting for ${{ matrix.host }} (${ip}:22) ..."
+          for _ in $(seq 1 60); do
+            if nc -z -w 5 "$ip" 22; then echo "SSH up"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::Timed out waiting for ${ip}:22"; exit 1
+
+      - name: Ansible deploy (${{ github.event.inputs.playbook || 'setup-ai-workspace-all-in-one.yml' }})
+        working-directory: ${{ env.PLAYBOOKS_DIR }}
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          # Python 3.13 目标（Debian 13 / Ubuntu 26.04）下，ansible apt 模块会抛
+          # DeprecationWarning，pipelining 模式会让该 stderr 污染模块返回 → UNREACHABLE。
+          # 关 pipelining 分离 stderr，并静默告警。
+          ANSIBLE_PIPELINING: "False"
+          PYTHONWARNINGS: "ignore"
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: |
+          set -euo pipefail
+          # -e 覆盖私钥：playbooks/group_vars/all.yml 把 ansible_ssh_private_key_file
+          # 固定成 id_rsa，会盖掉 --private-key；extra-vars 优先级最高。
+          ansible-playbook \
+            -i "${GITHUB_WORKSPACE}/cmdb/inventory.ini" \
+            --limit "${{ matrix.host }}" \
+            -e "ansible_ssh_private_key_file=${HOME}/.ssh/id_ed25519" \
+            "${{ github.event.inputs.playbook || 'setup-ai-workspace-all-in-one.yml' }}"
+
+  # ---------------------------------------------------------------------------
+  dns:
+    name: Sync Cloudflare DNS
+    needs: [provision, deploy]
+    if: ${{ needs.provision.outputs.count != '0' && (github.event.inputs.run_dns == 'true' || github.event.inputs.run_dns == null) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout infra (playbooks)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: ${{ github.event.inputs.infra_ref || 'main' }}
+          token: ${{ secrets.INFRA_REPO_TOKEN || github.token }}
+          path: infra
+
+      - name: Download CMDB + inventory
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-workspace-cmdb
+          path: cmdb
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install --quiet ansible
+
+      - name: Reconcile Cloudflare DNS from inventory
+        working-directory: ${{ env.PLAYBOOKS_DIR }}
+        env:
+          CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 只为本次新建的 ai_workspace 组主机同步 A 记录（域名取各主机
+          # service_domains hostvar，内容取其公网 IP），不动其它静态记录。
+          ansible-playbook \
+            -i "${GITHUB_WORKSPACE}/cmdb/inventory.ini" \
+            update_cloudflare_dns.yml \
+            -e '{"cloudflare_dns_source_hosts":["ai_workspace"],"cloudflare_dns_static_records":[]}'
