@@ -8,9 +8,6 @@ XWorkspace Console is the local AI workspace control plane for AI Workspace Lab.
 
 ![XWorkspace Console homepage preview](./assets/readme/homepage.png)
 
-### Image / Video
-
-Image and video workflows fit naturally as custom tabs inside the same console shell. This keeps artifact review, service switching, and runtime operations in one place instead of scattering them across separate apps.
 
 ## About
 
