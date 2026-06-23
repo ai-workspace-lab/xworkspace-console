@@ -2045,7 +2045,7 @@ if [ "$(detect_os)" = "darwin" ]; then
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_repo=https://github.com/ai-workspace-lab/xworkspace-console.git")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_version=main")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_api_working_dir=$XWORKSPACE_CONSOLE_DIR/api")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_api_exec=/usr/bin/env go run .")
+    ANSIBLE_EXTRA_VARS+=("-e" '{"xworkspace_console_api_exec":"/usr/bin/env go run ."}')
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_group=staff")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_ttyd_binary_path=$(command -v ttyd)")
     ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_user=$(id -un)")
