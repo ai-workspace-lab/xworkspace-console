@@ -42,6 +42,7 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 | `LITELLM_API_CADDY_STRICT_WHITELIST` | false | Enable with strict deployments when LiteLLM is exposed through Caddy. |
 | `XWORKSPACE_CONSOLE_ENABLE_XRDP` | false | Enable only when remote desktop access is required. |
 | `XWORKMATE_BRIDGE_DOMAIN` | host-specific | Set the public Bridge domain, for example `acp-bridge.onwalk.net`. |
+| `AI_WORKSPACE_OFFLINE_PACKAGE` | none | Use a pre-downloaded offline package for installation (e.g., `/path/to/offline.tar.gz`). |
 
 ## 4. Target Host Example
 

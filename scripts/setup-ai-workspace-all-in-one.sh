@@ -866,7 +866,8 @@ run_offline_installer() {
         XWORKSPACE_CONSOLE_HOME \
         XWORKSPACE_CONSOLE_SOURCE_REPO \
         XWORKSPACE_CONSOLE_SOURCE_VERSION \
-        AI_WORKSPACE_APT_LOCK_TIMEOUT; do
+        AI_WORKSPACE_APT_LOCK_TIMEOUT \
+        AI_WORKSPACE_OFFLINE_PACKAGE; do
         if [ -n "${!env_name+x}" ]; then
             env_args+=("$env_name=${!env_name}")
         fi

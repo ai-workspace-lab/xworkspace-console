@@ -40,6 +40,14 @@ export OLLAMA_API_KEY="your-key-here"
 curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
 ```
 
+3. Offline installation:
+
+Use a pre-downloaded deployment package by specifying its file path:
+```bash
+export AI_WORKSPACE_OFFLINE_PACKAGE="/path/to/offline-package.tar.gz"
+curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/setup-ai-workspace-all-in-one.sh | bash -
+```
+
 ### Uninstallation
 
 ```bash

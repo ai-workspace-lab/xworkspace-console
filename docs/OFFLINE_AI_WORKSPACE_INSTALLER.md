@@ -64,6 +64,13 @@ AI_WORKSPACE_OFFLINE_RELEASE_TAG=offline-ai-workspace-<run_number> \
   bash scripts/setup-ai-workspace-all-in-one.sh
 ```
 
+To use a specific, pre-downloaded offline deployment package from the local file system:
+
+```bash
+AI_WORKSPACE_OFFLINE_PACKAGE=/path/to/offline-package.tar.gz \
+  bash scripts/setup-ai-workspace-all-in-one.sh
+```
+
 You can also extract the target package on the host and run:
 
 ```bash
