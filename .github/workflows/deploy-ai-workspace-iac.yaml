@@ -62,6 +62,8 @@ concurrency:
 
 env:
   INFRA_REPO: ${{ github.repository_owner }}/ai-workspace-infra
+  # vultr-vps 根（共享 scripts/ templates/ config/）；ENV_DIR 为 terraform 运行目录(workdir)
+  VPS_ROOT: infra/iac_modules/terraform-hcl-standard/vultr-vps
   ENV_DIR: infra/iac_modules/terraform-hcl-standard/vultr-vps/envs/ai-workspace
   PLAYBOOKS_DIR: infra/playbooks
 
@@ -113,8 +115,8 @@ jobs:
           EOF
 
       - name: generate.py render (YAML -> 显式 HCL + tfvars)
-        working-directory: ${{ env.ENV_DIR }}
-        run: python3 generate.py render
+        working-directory: ${{ env.VPS_ROOT }}
+        run: python3 scripts/generate.py render
 
       - name: Terraform init
         working-directory: ${{ env.ENV_DIR }}
@@ -144,8 +146,8 @@ jobs:
 
       - name: generate.py inventory (terraform output + YAML -> cmdb.json + inventory.ini)
         if: ${{ (github.event.inputs.terraform_action || 'apply') == 'apply' }}
-        working-directory: ${{ env.ENV_DIR }}
-        run: python3 generate.py inventory
+        working-directory: ${{ env.VPS_ROOT }}
+        run: python3 scripts/generate.py inventory
 
       - name: Build deploy matrix from cmdb.json
         id: matrix
