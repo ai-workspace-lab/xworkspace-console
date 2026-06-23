@@ -33,7 +33,7 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 
 2. Automatic model registration (via API Keys):
 
-Exporting keys before running the installer automatically registers models (e.g., DeepSeek, NVIDIA, OLLAMA/GLM) in the gateway:
+Exporting keys before running the installer automatically registers models (e.g., DeepSeek、NVIDIA NIM、Ollama Cloud) in the gateway:
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
 export NVIDIA_API_KEY="nvapi-..."
