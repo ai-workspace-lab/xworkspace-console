@@ -2,7 +2,7 @@
 
 # XWorkspace Console
 
-XWorkspace Console 是 AI Workspace Lab 的本地 AI 工作区控制平面。它将 React 仪表板、Go 状态 API、systemd 用户服务以及 XFCE 桌面模板整合到一个多标签页界面中，用于服务管理、运行时管理、终端访问以及工作区导航。
+XWorkspace Console 是 AI Workspace Lab 的本地 AI 工作区控制平面。它将 React 仪表板、Go 状态 API、systemd 用户服务以及 XFCE 桌面（LinuxVPS 可选）模板整合到一个多标签页界面中，用于服务管理、运行时管理、终端访问以及工作区导航。
 
 ## 预览 (Preview)
 
