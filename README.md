@@ -1,3 +1,5 @@
+[🇺🇸 English](README.md) | [🇨🇳 中文](README.zh.md)
+
 # XWorkspace Console
 
 XWorkspace Console is the local AI workspace control plane for AI Workspace Lab. It brings together a React dashboard, Go status API, systemd user services, and XFCE desktop templates into one tabbed surface for services, runtime, terminal access, and workspace navigation.
@@ -77,14 +79,14 @@ http://127.0.0.1:17000
 - Latest source: [GitHub repository](https://github.com/ai-workspace-lab/xworkspace-console)
 - Releases: [GitHub Releases](https://github.com/ai-workspace-lab/xworkspace-console/releases)
 - Bootstrap script: `scripts/setup-ai-workspace-all-in-one.sh`
-- Offline installer docs: [`docs/OFFLINE_AI_WORKSPACE_INSTALLER.md`](docs/OFFLINE_AI_WORKSPACE_INSTALLER.md)
+- Offline installer docs: [`docs/en/OFFLINE_AI_WORKSPACE_INSTALLER.md`](docs/en/OFFLINE_AI_WORKSPACE_INSTALLER.md)
 
 ## Docs / Links
 
-- [`docs/FEATURES.md`](docs/FEATURES.md)
-- [`docs/VERSION_MATRIX.md`](docs/VERSION_MATRIX.md)
-- [`docs/REPOSITORY_OVERVIEW.md`](docs/REPOSITORY_OVERVIEW.md)
-- [`docs/SETUP_AI_WORKSPACE_ALL_IN_ONE.md`](docs/SETUP_AI_WORKSPACE_ALL_IN_ONE.md)
-- [`docs/OFFLINE_AI_WORKSPACE_INSTALLER.md`](docs/OFFLINE_AI_WORKSPACE_INSTALLER.md)
-- [`docs/operations/service-port-plan.md`](docs/operations/service-port-plan.md)
-- [`docs/designs/2026-06-07-ai-workspace-desktop-design.md`](docs/designs/2026-06-07-ai-workspace-desktop-design.md)
+- [`docs/en/FEATURES.md`](docs/en/FEATURES.md)
+- [`docs/en/VERSION_MATRIX.md`](docs/en/VERSION_MATRIX.md)
+- [`docs/en/REPOSITORY_OVERVIEW.md`](docs/en/REPOSITORY_OVERVIEW.md)
+- [`docs/en/SETUP_AI_WORKSPACE_ALL_IN_ONE.md`](docs/en/SETUP_AI_WORKSPACE_ALL_IN_ONE.md)
+- [`docs/en/OFFLINE_AI_WORKSPACE_INSTALLER.md`](docs/en/OFFLINE_AI_WORKSPACE_INSTALLER.md)
+- [`docs/en/operations/service-port-plan.md`](docs/en/operations/service-port-plan.md)
+- [`docs/en/designs/2026-06-07-ai-workspace-desktop-design.md`](docs/en/designs/2026-06-07-ai-workspace-desktop-design.md)
