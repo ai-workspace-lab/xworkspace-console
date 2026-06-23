@@ -1463,6 +1463,7 @@ print_parallel_service_statuses() {
     local status_dir
     local labels=(
         "Portal / Console"
+        "Portal API"
         "XWorkMate Bridge"
         "OpenClaw"
         "QMD"
@@ -1472,7 +1473,8 @@ print_parallel_service_statuses() {
         "LiteLLM"
     )
     local units=(
-        "xworkspace-console.service xworkspace-api.service"
+        "xworkspace-console.service"
+        "xworkspace-api.service"
         "xworkmate-bridge.service xworkspace-bridge.service"
         "xworkspace-openclaw.service openclaw-gateway.service openclaw.service"
         "qmd-mcp.service xworkspace-qmd.service qmd.service qdrant.service"
@@ -1481,9 +1483,10 @@ print_parallel_service_statuses() {
         "xworkspace-vault.service vault.service"
         "xworkspace-litellm.service litellm-proxy.service litellm.service"
     )
-    local ports=("17000" "8787" "18789" "8181" "3920" "5432" "8200" "${AI_WORKSPACE_LITELLM_PORT}")
+    local ports=("17000" "8788" "8787" "18789" "8181" "3920" "5432" "8200" "${AI_WORKSPACE_LITELLM_PORT}")
     local urls=(
         "http://127.0.0.1:17000/"
+        "http://127.0.0.1:8788/portal/services"
         "http://127.0.0.1:8787/"
         "http://127.0.0.1:18789/channels"
         "http://127.0.0.1:8181/"
