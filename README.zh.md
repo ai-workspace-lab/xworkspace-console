@@ -33,7 +33,7 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 
 2. 自动注册模型（通过 API 密钥）：
 
-在运行安装程序之前导出密钥，会自动在网关中注册模型（例如 DeepSeek、NVIDIA、OLLAMA/GLM）：
+在运行安装程序之前导出密钥，会自动在网关中注册模型（例如 DeepSeek、NVIDIA NIM、Ollama Cloud）：
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
 export NVIDIA_API_KEY="nvapi-..."
