@@ -2120,28 +2120,34 @@ chmod 600 "$VAULT_FILE"
 
 
 # 6. Run Ansible Playbook locally
+# inventory_hostname 取 FQDN（优先 operator/流水线注入的 bridge 域名，源自 CMDB
+# service_domains；否则主机自身 FQDN），避免硬编码落成 127.0.0.1。-c local 仍本地执行。
+AIWS_INV_HOST="${XWORKMATE_BRIDGE_DOMAIN:-${SERVER_DOMAIN:-${BRIDGE_DOMAIN:-${ACP_BRIDGE_DOMAIN:-}}}}"
+[ -z "$AIWS_INV_HOST" ] && AIWS_INV_HOST="$(hostname -f 2>/dev/null || true)"
+case "$AIWS_INV_HOST" in ""|localhost|127.0.0.1|*[!a-zA-Z0-9.-]*) AIWS_INV_HOST="127.0.0.1" ;; esac
+info "Ansible inventory_hostname = ${AIWS_INV_HOST}"
 wait_for_apt_locks
 RET=0
 if [ "$AI_WORKSPACE_SPLIT_PHASES" = "true" ]; then
     info "Running AI Workspace preflight..."
-    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-preflight.yml \
+    ansible-playbook -i "${AIWS_INV_HOST}," -c local setup-ai-workspace-preflight.yml \
         --vault-password-file "$VAULT_FILE" \
         "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
     if [ "$RET" -eq 0 ]; then
         info "Running serialized Node.js foundation phase..."
-        ansible-playbook -i '127.0.0.1,' -c local setup-nodejs.yml \
+        ansible-playbook -i "${AIWS_INV_HOST}," -c local setup-nodejs.yml \
             --vault-password-file "$VAULT_FILE" \
             "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
     fi
     if [ "$RET" -eq 0 ]; then
         info "Running remaining AI Workspace runtime phases..."
-        ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-runtime.yml \
+        ansible-playbook -i "${AIWS_INV_HOST}," -c local setup-ai-workspace-runtime.yml \
             --vault-password-file "$VAULT_FILE" \
             "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
     fi
 else
     info "Running monolithic AI Workspace Playbook..."
-    ansible-playbook -i '127.0.0.1,' -c local setup-ai-workspace-all-in-one.yml \
+    ansible-playbook -i "${AIWS_INV_HOST}," -c local setup-ai-workspace-all-in-one.yml \
         --vault-password-file "$VAULT_FILE" \
         "${ANSIBLE_EXTRA_VARS[@]}" || RET=$?
 fi
