@@ -3,10 +3,13 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 # =============================================================================
 # IaC ↔ Ansible 动态 inventory 联动的最终部署流水线（矩阵模式）
 #
-#   provision : 用 vultr-vps/envs/ai-workspace 创建主机（Python+Jinja2 渲染显式
+#   provision : 批量起机模式（开关：terraform_action=apply / run_deploy）。
+#               用 vultr-vps/envs/ai-workspace 创建主机（Python+Jinja2 渲染显式
 #               HCL，无 for_each），导出 cmdb.json + inventory.ini，并据此动态
 #               生成下游部署矩阵。
-#   deploy    : 矩阵按主机并行，用 Ansible all-in-one playbook 部署 AI Workspace。
+#   deploy    : 矩阵按主机并行，ssh 到主机本地跑官方引导（curl|bash → host 内部
+#               ansible -c local，自动离线包加速）。与用户 self-host 同一路径；
+#               不在 runner 远程跑 all-in-one（会撞 agent_skills delegate_to localhost）。
 #   dns       : 部署完成后，依据 inventory 的 service_domains/IP 同步 Cloudflare DNS。
 #
 # 数据契约 cmdb.json 由 ai-workspace-infra 的 generate.py 产出，贯穿三个 job。
@@ -172,7 +175,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   deploy:
-    name: Deploy ${{ matrix.host }}
+    name: Deploy ${{ matrix.host }} (on-host bootstrap)
     needs: provision
     if: ${{ needs.provision.outputs.count != '0' && (github.event.inputs.run_deploy == 'true' || github.event.inputs.run_deploy == null) }}
     runs-on: ubuntu-latest
@@ -181,26 +184,15 @@ jobs:
       matrix:
         host: ${{ fromJSON(needs.provision.outputs.hosts) }}
     steps:
-      - name: Checkout infra (playbooks)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.INFRA_REPO }}
-          ref: ${{ github.event.inputs.infra_ref || 'main' }}
-          token: ${{ secrets.INFRA_REPO_TOKEN || github.token }}
-          path: infra
-
-      - name: Download CMDB + inventory
+      # all-in-one 是“在目标主机本地执行”的模型（host 内部 ansible-playbook -c local，
+      # 自动走离线包加速）。从 runner 远程跑 all-in-one 会撞 roles/agent_skills 的
+      # delegate_to: localhost（写 runner 本地 /root），故 deploy 改为 ssh 到主机本地
+      # 跑官方引导脚本——与用户 self-host 的 curl|bash 完全同一路径。
+      - name: Download CMDB (host IP source)
         uses: actions/download-artifact@v4
         with:
           name: ai-workspace-cmdb
           path: cmdb
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Ansible
-        run: pip install --quiet ansible
 
       - name: Configure SSH
         run: |
@@ -220,27 +212,25 @@ jobs:
           done
           echo "::error::Timed out waiting for ${ip}:22"; exit 1
 
-      - name: Ansible deploy (${{ github.event.inputs.playbook || 'setup-ai-workspace-all-in-one.yml' }})
-        working-directory: ${{ env.PLAYBOOKS_DIR }}
+      - name: Run on-host bootstrap (curl | bash, local-mode install)
         env:
-          ANSIBLE_HOST_KEY_CHECKING: "False"
-          # Python 3.13 目标（Debian 13 / Ubuntu 26.04）下，ansible apt 模块会抛
-          # DeprecationWarning，pipelining 模式会让该 stderr 污染模块返回 → UNREACHABLE。
-          # 关 pipelining 分离 stderr，并静默告警。
-          ANSIBLE_PIPELINING: "False"
-          PYTHONWARNINGS: "ignore"
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
         run: |
           set -euo pipefail
-          # -e 覆盖私钥：playbooks/group_vars/all.yml 把 ansible_ssh_private_key_file
-          # 固定成 id_rsa，会盖掉 --private-key；extra-vars 优先级最高。
-          ansible-playbook \
-            -i "${GITHUB_WORKSPACE}/cmdb/inventory.ini" \
-            --limit "${{ matrix.host }}" \
-            -e "ansible_ssh_private_key_file=${HOME}/.ssh/id_ed25519" \
-            "${{ github.event.inputs.playbook || 'setup-ai-workspace-all-in-one.yml' }}"
+          ip="$(jq -r '.["${{ matrix.host }}"].ip' cmdb/cmdb.json)"
+          user="$(jq -r '.["${{ matrix.host }}"].ansible_user // "root"' cmdb/cmdb.json)"
+          echo "Bootstrapping ${{ matrix.host }} (${user}@${ip}) on-host ..."
+          ssh -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=accept-new \
+            -o ServerAliveInterval=20 -o ServerAliveCountMax=15 \
+            -o ConnectTimeout=20 \
+            "${user}@${ip}" \
+            "DEEPSEEK_API_KEY='${DEEPSEEK_API_KEY}' \
+             NVIDIA_API_KEY='${NVIDIA_API_KEY}' \
+             OLLAMA_API_KEY='${OLLAMA_API_KEY}' \
+             bash -lc 'curl -sfL https://install.svc.plus/ai-workspace | bash -'"
 
   # ---------------------------------------------------------------------------
   dns:

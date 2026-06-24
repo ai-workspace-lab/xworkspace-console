@@ -47,14 +47,27 @@ config/resources/ai-workspace-hosts.yaml        (IaC 声明, 唯一人工入口)
 | 3 | xfce4 大装包拖断 SSH 会话 | "Install runtime packages" UNREACHABLE(包其实装完) | 该 apt 任务加 `async/poll` |
 | 4 | ai_agent_runtime apt 抢 dpkg 锁 | texlive/pandoc `Could not get lock` | `roles/ai_agent_runtime/tasks/{main,docs,fonts,browser}.yml` 加 `lock_timeout` |
 | 5 | console API 二进制路径错 | `api/xworkspace-api` 不存在 → `203/EXEC` 崩溃重启 | manifest `apiBinary: bin/xworkspace-api`,`setup-xworkspace-console.yaml` 的 `api_dir` 改 `bin/` |
+| 6 | console 伺服方式错 | 预编译只发 `dashboard/dist`(无 package.json),`npm run preview` ENOENT(254)崩溃重启 | console 是 `127.0.0.1:17000` 上的**本地静态后端**(dashboard 为无路由单页),Linux `console.service` 与 macOS `console.plist` 统一用 `python3 -m http.server --directory dist`;**不**起第二个 caddy(避免与系统 caddy 抢 :80） |
+| 7 | caddy 安装未受开关控制 | console play 无条件 `apt install caddy` | apt 列表里 caddy 由 `caddy_enabled` 门控(VPS 默认 true;关→不装;macOS 无 apt 本就不装) |
 
 部署侧加固(长途控制连接稳定性): `ANSIBLE_SSH_ARGS` 加 `ServerAliveInterval/ControlPersist`, `ANSIBLE_SSH_RETRIES`。
 
-## 5. 待办(remaining)
+## 4b. 公网暴露 / caddy 架构
 
-- **console.service 伺服方式**: 预编译 runtime 只发 `dashboard/dist`(无 package.json),
-  而服务跑 `npm run preview` → ENOENT 崩溃重启。需改为**静态伺服 dist**(候选: api 二进制自带伺服 / caddy file_server / 静态服务器),属 app 设计决策,未擅改。
-- **deploy 流水线**: `deploy-ai-workspace-iac.yaml` 的 deploy job 由"runner 跑 all-in-one"改为"用 inventory 在主机上跑 curl|bash 引导"(契合本地执行模型 + 离线加速)。
+- **caddy 是统一反代前端**(:80/:443),每个**对外**服务一份 `/etc/caddy/conf.d/*.caddy`(`reverse_proxy` 到其本地端口）。
+- **Linux VPS(有公网 IP)**:默认仅 `XWORKMATE_BRIDGE_PUBLIC_ACCESS` 开(经 `-e` 传入)→ bridge 进 conf.d 对外;console(17000）等 `*_PUBLIC_ACCESS` 默认 false → **本地only、无 conf.d**。`caddy_enabled` 默认 true → 装 caddy。
+- **macOS 本机**:无需暴露任何公网服务、全内网、`caddy_enabled=false` → **不装 caddy**;console 同样 python 本地伺服。
+- 注意 `:80` 由 **apt caddy 包自带的默认 `/etc/caddy/Caddyfile`(`:80 {}`)** 占用;早期把 console 也做成第二个 caddy 会因 auto-HTTPS 预留 :80 而冲突——故 console 改为 python 静态后端、由系统 caddy 反代(本地only 时则不反代）。
+
+## 5. 验证结果(已闭合）
+
+| 平台 | console | api | 17000 |
+|------|---------|-----|-------|
+| debian13(caddy_enabled=true） | active(python3） | active | 200 `<title>XWorkspace Dashboard</title>` |
+| ubuntu26.04 | active(python3） | active | 200 |
+| macOS 本机(python3 伺服 dist） | — | — | 200 `<title>XWorkspace Dashboard</title>` |
+
+- deploy 流水线: `deploy-ai-workspace-iac.yaml` 的 deploy job 已改为"ssh 到主机本地跑 curl|bash 引导"(契合本地执行模型 + 离线加速),provision job 保留为批量起机模式。
 
 ## 6. 离线/在线回退确认
 
