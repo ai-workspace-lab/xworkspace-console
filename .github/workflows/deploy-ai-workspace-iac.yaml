@@ -14,16 +14,18 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 #
 # 数据契约 cmdb.json 由 ai-workspace-infra 的 generate.py 产出，贯穿三个 job。
 #
-# 需要在仓库 Settings → Secrets and variables → Actions 配置的 Secrets：
-#   VULTR_API_KEY          Vultr API Key（→ TF_VAR_vultr_api_key）
-#   INFRA_REPO_TOKEN       可读 ai-workspace-infra 的 PAT（私有仓库时必需）
-#   ANSIBLE_SSH_KEY        与 hosts.yaml 中公钥配对的 SSH 私钥（连主机用）
-#   CLOUDFLARE_API_TOKEN   Cloudflare DNS 编辑权限 token
-#   DEEPSEEK_API_KEY       \
-#   NVIDIA_API_KEY          > LLM provider keys，注入部署目标
-#   OLLAMA_API_KEY         /
-#   可选（远端 TF state，S3 兼容 / Vultr 对象存储）：
-#   TF_STATE_ENDPOINT TF_STATE_BUCKET TF_STATE_ACCESS_KEY TF_STATE_SECRET_KEY TF_STATE_REGION
+# 密钥管理：不使用 GitHub Actions Secrets，统一从 HashiCorp Vault
+# (https://vault.svc.plus) KV 安全获取，认证走 GitHub OIDC（JWT，无静态 token）。
+#   - Vault 角色:   github-actions-xworkspace-console  (jwt auth, audience=vault)
+#   - KV 路径:      kv/data/github-actions/xworkspace-console
+#   - 需在该 KV 写入的键：
+#       VULTR_API_KEY           Vultr API Key（→ TF_VAR_vultr_api_key）
+#       INFRA_REPO_TOKEN        可读 ai-workspace-infra 的 PAT（私有仓库时必需）
+#       ANSIBLE_SSH_KEY         与 hosts.yaml 公钥配对的 SSH 私钥（连主机用）
+#       CLOUDFLARE_API_TOKEN    Cloudflare DNS 编辑权限 token
+#       DEEPSEEK_API_KEY / NVIDIA_API_KEY / OLLAMA_API_KEY   LLM provider keys
+#       可选（远端 TF state，S3 兼容 / Vultr 对象存储）：
+#       TF_STATE_ENDPOINT TF_STATE_BUCKET TF_STATE_ACCESS_KEY TF_STATE_SECRET_KEY TF_STATE_REGION
 # =============================================================================
 
 on:
@@ -34,11 +36,6 @@ on:
         required: false
         default: "main"
         type: string
-      playbook:
-        description: "部署用的 playbook（相对 playbooks/）"
-        required: false
-        default: "setup-ai-workspace-all-in-one.yml"
-        type: string
       terraform_action:
         description: "apply 创建/更新，destroy 销毁"
         required: false
@@ -46,7 +43,7 @@ on:
         type: choice
         options: [apply, destroy]
       run_deploy:
-        description: "provision 后是否执行 Ansible 部署"
+        description: "provision 后是否执行 on-host 引导部署"
         required: false
         default: true
         type: boolean
@@ -56,14 +53,19 @@ on:
         default: true
         type: boolean
 
+# id-token: write 用于 Vault 的 GitHub OIDC(JWT) 认证；contents: read 拉代码
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: deploy-ai-workspace-iac
   cancel-in-progress: false
 
 env:
+  VAULT_ADDR: https://vault.svc.plus
+  VAULT_ROLE: github-actions-xworkspace-console
+  VAULT_KV: kv/data/github-actions/xworkspace-console
   INFRA_REPO: ${{ github.repository_owner }}/ai-workspace-infra
   # vultr-vps 根（共享 scripts/ templates/ config/）；ENV_DIR 为 terraform 运行目录(workdir)
   VPS_ROOT: infra/iac_modules/terraform-hcl-standard/vultr-vps
@@ -75,18 +77,34 @@ jobs:
   provision:
     name: Provision (terraform + render CMDB)
     runs-on: ubuntu-latest
-    env:
-      HAS_BACKEND: ${{ secrets.TF_STATE_BUCKET != '' }}
     outputs:
       hosts: ${{ steps.matrix.outputs.hosts }}
       count: ${{ steps.matrix.outputs.count }}
     steps:
+      - name: Load Vault secrets (OIDC)
+        id: vault
+        uses: hashicorp/vault-action@v2
+        with:
+          url: ${{ env.VAULT_ADDR }}
+          method: jwt
+          role: ${{ env.VAULT_ROLE }}
+          jwtGithubAudience: vault
+          ignoreNotFound: true
+          secrets: |
+            ${{ env.VAULT_KV }} VULTR_API_KEY | VULTR_API_KEY ;
+            ${{ env.VAULT_KV }} INFRA_REPO_TOKEN | INFRA_REPO_TOKEN ;
+            ${{ env.VAULT_KV }} TF_STATE_ENDPOINT | TF_STATE_ENDPOINT ;
+            ${{ env.VAULT_KV }} TF_STATE_BUCKET | TF_STATE_BUCKET ;
+            ${{ env.VAULT_KV }} TF_STATE_ACCESS_KEY | TF_STATE_ACCESS_KEY ;
+            ${{ env.VAULT_KV }} TF_STATE_SECRET_KEY | TF_STATE_SECRET_KEY ;
+            ${{ env.VAULT_KV }} TF_STATE_REGION | TF_STATE_REGION
+
       - name: Checkout infra (iac_modules + playbooks)
         uses: actions/checkout@v4
         with:
           repository: ${{ env.INFRA_REPO }}
           ref: ${{ github.event.inputs.infra_ref || 'main' }}
-          token: ${{ secrets.INFRA_REPO_TOKEN || github.token }}
+          token: ${{ steps.vault.outputs.INFRA_REPO_TOKEN || github.token }}
           path: infra
 
       - uses: hashicorp/setup-terraform@v3
@@ -101,7 +119,7 @@ jobs:
         run: pip install --quiet pyyaml jinja2
 
       - name: Configure remote backend (optional)
-        if: ${{ env.HAS_BACKEND == 'true' }}
+        if: ${{ steps.vault.outputs.TF_STATE_BUCKET != '' }}
         working-directory: ${{ env.ENV_DIR }}
         run: |
           set -euo pipefail
@@ -124,25 +142,28 @@ jobs:
       - name: Terraform init
         working-directory: ${{ env.ENV_DIR }}
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ steps.vault.outputs.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.vault.outputs.TF_STATE_SECRET_KEY }}
+          TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
+          TF_STATE_BUCKET: ${{ steps.vault.outputs.TF_STATE_BUCKET }}
+          TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
         run: |
           set -euo pipefail
-          if [ -n "${{ secrets.TF_STATE_BUCKET }}" ]; then
+          if [ -n "${TF_STATE_BUCKET}" ]; then
             terraform init -input=false \
-              -backend-config="endpoint=${{ secrets.TF_STATE_ENDPOINT }}" \
-              -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+              -backend-config="endpoint=${TF_STATE_ENDPOINT}" \
+              -backend-config="bucket=${TF_STATE_BUCKET}" \
               -backend-config="key=ai-workspace/terraform.tfstate" \
-              -backend-config="region=${{ secrets.TF_STATE_REGION || 'us-east-1' }}"
+              -backend-config="region=${TF_STATE_REGION:-us-east-1}"
           else
-            echo "::warning::未配置远端 state，使用本地 state（仅适合一次性演示，destroy 需同一次运行）"
+            echo "::warning::未配置远端 state(Vault 无 TF_STATE_BUCKET)，使用本地 state（仅适合一次性演示，destroy 需同一次运行）"
             terraform init -input=false
           fi
 
       - name: Terraform ${{ github.event.inputs.terraform_action || 'apply' }}
         working-directory: ${{ env.ENV_DIR }}
         env:
-          TF_VAR_vultr_api_key: ${{ secrets.VULTR_API_KEY }}
+          TF_VAR_vultr_api_key: ${{ steps.vault.outputs.VULTR_API_KEY }}
         run: |
           set -euo pipefail
           terraform ${{ github.event.inputs.terraform_action || 'apply' }} -auto-approve -input=false
@@ -188,6 +209,20 @@ jobs:
       # 自动走离线包加速）。从 runner 远程跑 all-in-one 会撞 roles/agent_skills 的
       # delegate_to: localhost（写 runner 本地 /root），故 deploy 改为 ssh 到主机本地
       # 跑官方引导脚本——与用户 self-host 的 curl|bash 完全同一路径。
+      - name: Load Vault secrets (OIDC)
+        id: vault
+        uses: hashicorp/vault-action@v2
+        with:
+          url: ${{ env.VAULT_ADDR }}
+          method: jwt
+          role: ${{ env.VAULT_ROLE }}
+          jwtGithubAudience: vault
+          secrets: |
+            ${{ env.VAULT_KV }} ANSIBLE_SSH_KEY | ANSIBLE_SSH_KEY ;
+            ${{ env.VAULT_KV }} DEEPSEEK_API_KEY | DEEPSEEK_API_KEY ;
+            ${{ env.VAULT_KV }} NVIDIA_API_KEY | NVIDIA_API_KEY ;
+            ${{ env.VAULT_KV }} OLLAMA_API_KEY | OLLAMA_API_KEY
+
       - name: Download CMDB (host IP source)
         uses: actions/download-artifact@v4
         with:
@@ -198,7 +233,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.ANSIBLE_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${{ steps.vault.outputs.ANSIBLE_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
       - name: Wait for host SSH
@@ -214,9 +249,9 @@ jobs:
 
       - name: Run on-host bootstrap (curl | bash, local-mode install)
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ steps.vault.outputs.DEEPSEEK_API_KEY }}
+          NVIDIA_API_KEY: ${{ steps.vault.outputs.NVIDIA_API_KEY }}
+          OLLAMA_API_KEY: ${{ steps.vault.outputs.OLLAMA_API_KEY }}
         run: |
           set -euo pipefail
           ip="$(jq -r '.["${{ matrix.host }}"].ip' cmdb/cmdb.json)"
@@ -239,12 +274,25 @@ jobs:
     if: ${{ needs.provision.outputs.count != '0' && (github.event.inputs.run_dns == 'true' || github.event.inputs.run_dns == null) }}
     runs-on: ubuntu-latest
     steps:
+      - name: Load Vault secrets (OIDC)
+        id: vault
+        uses: hashicorp/vault-action@v2
+        with:
+          url: ${{ env.VAULT_ADDR }}
+          method: jwt
+          role: ${{ env.VAULT_ROLE }}
+          jwtGithubAudience: vault
+          ignoreNotFound: true
+          secrets: |
+            ${{ env.VAULT_KV }} INFRA_REPO_TOKEN | INFRA_REPO_TOKEN ;
+            ${{ env.VAULT_KV }} CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
+
       - name: Checkout infra (playbooks)
         uses: actions/checkout@v4
         with:
           repository: ${{ env.INFRA_REPO }}
           ref: ${{ github.event.inputs.infra_ref || 'main' }}
-          token: ${{ secrets.INFRA_REPO_TOKEN || github.token }}
+          token: ${{ steps.vault.outputs.INFRA_REPO_TOKEN || github.token }}
           path: infra
 
       - name: Download CMDB + inventory
@@ -263,7 +311,7 @@ jobs:
       - name: Reconcile Cloudflare DNS from inventory
         working-directory: ${{ env.PLAYBOOKS_DIR }}
         env:
-          CLOUDFLARE_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           # 只为本次新建的 ai_workspace 组主机同步 A 记录（域名取各主机
