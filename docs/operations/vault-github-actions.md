@@ -25,6 +25,13 @@ path "kv/data/CICD" {
 path "kv/metadata/CICD" {
   capabilities = ["read", "list"]
 }
+# LLM provider keys 在 openclaw 路径
+path "kv/data/openclaw" {
+  capabilities = ["read"]
+}
+path "kv/metadata/openclaw" {
+  capabilities = ["read", "list"]
+}
 EOF
 
 # 2.2 role：仅绑定本仓库的 GitHub OIDC 身份
@@ -43,24 +50,20 @@ vault write auth/jwt/role/github-actions-xworkspace-console \
 > 共享 KV 仅授予 read。如需仅限分支，把 `sub` 收窄为
 > `repo:ai-workspace-lab/xworkspace-console:ref:refs/heads/main`。
 
-## 3. KV 字段（`kv/data/CICD`，复用既有共享键）
+## 3. KV 字段（复用既有共享键，跨两条路径）
 
-| Vault 键 | 映射到 workflow 输出 | 用途 | 状态 |
+| Vault 路径 | 键 | 映射到输出 | 用途 |
 | --- | --- | --- | --- |
-| `VULTR_API_KEY` | `VULTR_API_KEY` | provision：`TF_VAR_vultr_api_key` | 已有 |
-| `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN` | `INFRA_REPO_TOKEN` | checkout 私有 `ai-workspace-infra` | 已有 |
-| `CLOUDFLARE_DNS_API_TOKEN` | `CLOUDFLARE_DNS_API_TOKEN` | dns：Cloudflare DNS 编辑 | 已有 |
-| `SSH_PRIVATE_DEPLOY_KEY_B64` | `ANSIBLE_SSH_KEY_B64` | 连主机 SSH 私钥（**优先**，单行 base64） | 已有 |
-| `SSH_PRIVATE_DEPLOY_KEY` | `ANSIBLE_SSH_KEY` | 同上原始多行（回退） | 已有 |
-| `DEEPSEEK_API_KEY` / `NVIDIA_API_KEY` / `OLLAMA_API_KEY` | 同名 | deploy：注入主机的 LLM provider keys | **需补写** |
-| `TF_STATE_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY/REGION` | 同名 | 可选远端 TF state（不配则本地 state） | 可选 |
+| `kv/data/CICD` | `VULTR_API_KEY` | `VULTR_API_KEY` | provision：`TF_VAR_vultr_api_key` |
+| `kv/data/CICD` | `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN` | `INFRA_REPO_TOKEN` | checkout 私有 `ai-workspace-infra` |
+| `kv/data/CICD` | `CLOUDFLARE_DNS_API_TOKEN` | `CLOUDFLARE_DNS_API_TOKEN` | dns：Cloudflare DNS 编辑 |
+| `kv/data/CICD` | `SSH_PRIVATE_DEPLOY_KEY_B64` | `ANSIBLE_SSH_KEY_B64` | 连主机 SSH 私钥（**优先**，单行 base64） |
+| `kv/data/CICD` | `SSH_PRIVATE_DEPLOY_KEY` | `ANSIBLE_SSH_KEY` | 同上原始多行（回退） |
+| `kv/data/openclaw` | `DEEPSEEK_API_KEY` / `NVIDIA_API_KEY` / `OLLAMA_API_KEY` | 同名 | deploy：注入主机的 LLM provider keys |
+| `kv/data/CICD` | `TF_STATE_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY/REGION` | 同名 | 可选远端 TF state（不配则本地 state） |
 
-需补写三个 LLM key（其余键已存在）：
-
-```bash
-vault kv patch kv/CICD \
-  DEEPSEEK_API_KEY=... NVIDIA_API_KEY=... OLLAMA_API_KEY=...
-```
+> 所有键均已存在（LLM key 在 `kv/openclaw`，其余共享键在 `kv/CICD`）。
+> vault-action 一个步骤可跨多路径读，每行自带路径。
 
 > 主机登录用 `SSH_PRIVATE_DEPLOY_KEY`，其公钥 `SSH_PUBLIC_DEPLOY_KEY` 须写入
 > `ai-workspace-infra` 的 `vultr-vps/config/resources/ai-workspace-hosts.yaml`

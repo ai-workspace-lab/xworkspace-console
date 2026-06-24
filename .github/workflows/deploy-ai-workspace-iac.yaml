@@ -17,14 +17,14 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 # 密钥管理：不使用 GitHub Actions Secrets，统一从 HashiCorp Vault
 # (https://vault.svc.plus) KV 安全获取，认证走 GitHub OIDC（JWT，无静态 token）。
 #   - Vault 角色:   github-actions-xworkspace-console  (jwt auth, audience=vault)
-#   - KV 路径:      kv/data/CICD（共享 CICD 机密，复用既有键名）
+#   - KV 路径:      kv/data/CICD（共享 CICD 机密） + kv/data/openclaw（LLM keys）
 #   - 用到的键（详见 docs/operations/vault-github-actions.md）：
-#       VULTR_API_KEY                       → TF_VAR_vultr_api_key
-#       CODEX_GITHUB_PERSONAL_ACCESS_TOKEN  → checkout ai-workspace-infra
-#       SSH_PRIVATE_DEPLOY_KEY[_B64]        → 连主机 SSH 私钥（B64 优先）
-#       CLOUDFLARE_DNS_API_TOKEN            → Cloudflare DNS 编辑
-#       DEEPSEEK_API_KEY / NVIDIA_API_KEY / OLLAMA_API_KEY  → LLM provider keys（需补写）
-#       可选远端 TF state：TF_STATE_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY/REGION
+#       [kv/CICD] VULTR_API_KEY                      → TF_VAR_vultr_api_key
+#       [kv/CICD] CODEX_GITHUB_PERSONAL_ACCESS_TOKEN → checkout ai-workspace-infra
+#       [kv/CICD] SSH_PRIVATE_DEPLOY_KEY[_B64]       → 连主机 SSH 私钥（B64 优先）
+#       [kv/CICD] CLOUDFLARE_DNS_API_TOKEN           → Cloudflare DNS 编辑
+#       [kv/openclaw] DEEPSEEK_API_KEY / NVIDIA_API_KEY / OLLAMA_API_KEY → LLM provider keys
+#       [kv/CICD] 可选远端 TF state：TF_STATE_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY/REGION
 # =============================================================================
 
 on:
@@ -66,6 +66,8 @@ env:
   VAULT_ROLE: github-actions-xworkspace-console
   # 共享 CICD 机密路径（KV v2 读路径含 data/）。键名见 docs/operations/vault-github-actions.md
   VAULT_KV: kv/data/CICD
+  # LLM provider keys 放在 openclaw 路径
+  VAULT_KV_OPENCLAW: kv/data/openclaw
   INFRA_REPO: ${{ github.repository_owner }}/ai-workspace-infra
   # vultr-vps 根（共享 scripts/ templates/ config/）；ENV_DIR 为 terraform 运行目录(workdir)
   VPS_ROOT: infra/iac_modules/terraform-hcl-standard/vultr-vps
@@ -221,9 +223,9 @@ jobs:
           secrets: |
             ${{ env.VAULT_KV }} SSH_PRIVATE_DEPLOY_KEY | ANSIBLE_SSH_KEY ;
             ${{ env.VAULT_KV }} SSH_PRIVATE_DEPLOY_KEY_B64 | ANSIBLE_SSH_KEY_B64 ;
-            ${{ env.VAULT_KV }} DEEPSEEK_API_KEY | DEEPSEEK_API_KEY ;
-            ${{ env.VAULT_KV }} NVIDIA_API_KEY | NVIDIA_API_KEY ;
-            ${{ env.VAULT_KV }} OLLAMA_API_KEY | OLLAMA_API_KEY
+            ${{ env.VAULT_KV_OPENCLAW }} DEEPSEEK_API_KEY | DEEPSEEK_API_KEY ;
+            ${{ env.VAULT_KV_OPENCLAW }} NVIDIA_API_KEY | NVIDIA_API_KEY ;
+            ${{ env.VAULT_KV_OPENCLAW }} OLLAMA_API_KEY | OLLAMA_API_KEY
 
       - name: Download CMDB (host IP source)
         uses: actions/download-artifact@v4
