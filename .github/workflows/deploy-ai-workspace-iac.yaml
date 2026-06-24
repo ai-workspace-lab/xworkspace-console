@@ -17,15 +17,14 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 # 密钥管理：不使用 GitHub Actions Secrets，统一从 HashiCorp Vault
 # (https://vault.svc.plus) KV 安全获取，认证走 GitHub OIDC（JWT，无静态 token）。
 #   - Vault 角色:   github-actions-xworkspace-console  (jwt auth, audience=vault)
-#   - KV 路径:      kv/data/github-actions/xworkspace-console
-#   - 需在该 KV 写入的键：
-#       VULTR_API_KEY           Vultr API Key（→ TF_VAR_vultr_api_key）
-#       INFRA_REPO_TOKEN        可读 ai-workspace-infra 的 PAT（私有仓库时必需）
-#       ANSIBLE_SSH_KEY         与 hosts.yaml 公钥配对的 SSH 私钥（连主机用）
-#       CLOUDFLARE_API_TOKEN    Cloudflare DNS 编辑权限 token
-#       DEEPSEEK_API_KEY / NVIDIA_API_KEY / OLLAMA_API_KEY   LLM provider keys
-#       可选（远端 TF state，S3 兼容 / Vultr 对象存储）：
-#       TF_STATE_ENDPOINT TF_STATE_BUCKET TF_STATE_ACCESS_KEY TF_STATE_SECRET_KEY TF_STATE_REGION
+#   - KV 路径:      kv/data/CICD（共享 CICD 机密，复用既有键名）
+#   - 用到的键（详见 docs/operations/vault-github-actions.md）：
+#       VULTR_API_KEY                       → TF_VAR_vultr_api_key
+#       CODEX_GITHUB_PERSONAL_ACCESS_TOKEN  → checkout ai-workspace-infra
+#       SSH_PRIVATE_DEPLOY_KEY[_B64]        → 连主机 SSH 私钥（B64 优先）
+#       CLOUDFLARE_DNS_API_TOKEN            → Cloudflare DNS 编辑
+#       DEEPSEEK_API_KEY / NVIDIA_API_KEY / OLLAMA_API_KEY  → LLM provider keys（需补写）
+#       可选远端 TF state：TF_STATE_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY/REGION
 # =============================================================================
 
 on:
