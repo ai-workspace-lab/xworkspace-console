@@ -106,6 +106,20 @@ jobs:
             ${{ env.VAULT_KV }} TF_STATE_SECRET_KEY | TF_STATE_SECRET_KEY ;
             ${{ env.VAULT_KV }} TF_STATE_REGION | TF_STATE_REGION
 
+      - name: Validate required secrets
+        env:
+          VULTR_API_KEY: ${{ steps.vault.outputs.VULTR_API_KEY }}
+        run: |
+          set -euo pipefail
+          # 只校验 REQUIRED 机密非空（不打印任何值，仅判空）；可选键
+          # (INFRA_REPO_TOKEN / TF_STATE_*) 不在此校验。
+          missing=0
+          if [ -z "${VULTR_API_KEY:-}" ]; then
+            echo "::error::缺少必需机密 VULTR_API_KEY (Vault: ${VAULT_KV}/VULTR_API_KEY)"
+            missing=1
+          fi
+          [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 provision"; exit 1; }
+
       - name: Checkout infra (iac_modules + playbooks)
         uses: actions/checkout@v4
         with:
@@ -232,6 +246,36 @@ jobs:
             ${{ env.VAULT_KV_OPENCLAW }} NVIDIA_API_KEY | NVIDIA_API_KEY ;
             ${{ env.VAULT_KV_OPENCLAW }} OLLAMA_API_KEY | OLLAMA_API_KEY
 
+      - name: Validate required secrets
+        env:
+          ANSIBLE_SSH_KEY: ${{ steps.vault.outputs.ANSIBLE_SSH_KEY }}
+          ANSIBLE_SSH_KEY_B64: ${{ steps.vault.outputs.ANSIBLE_SSH_KEY_B64 }}
+          DEEPSEEK_API_KEY: ${{ steps.vault.outputs.DEEPSEEK_API_KEY }}
+          NVIDIA_API_KEY: ${{ steps.vault.outputs.NVIDIA_API_KEY }}
+          OLLAMA_API_KEY: ${{ steps.vault.outputs.OLLAMA_API_KEY }}
+        run: |
+          set -euo pipefail
+          # 只校验 REQUIRED 机密非空（不打印任何值，仅判空）。
+          missing=0
+          # SSH 私钥：B64 与原始至少有一个非空。
+          if [ -z "${ANSIBLE_SSH_KEY_B64:-}" ] && [ -z "${ANSIBLE_SSH_KEY:-}" ]; then
+            echo "::error::缺少必需机密 SSH 私钥 (Vault: ${VAULT_KV}/SSH_PRIVATE_DEPLOY_KEY_B64 或 ${VAULT_KV}/SSH_PRIVATE_DEPLOY_KEY，至少一个)"
+            missing=1
+          fi
+          if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+            echo "::error::缺少必需机密 DEEPSEEK_API_KEY (Vault: ${VAULT_KV_OPENCLAW}/DEEPSEEK_API_KEY)"
+            missing=1
+          fi
+          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+            echo "::error::缺少必需机密 NVIDIA_API_KEY (Vault: ${VAULT_KV_OPENCLAW}/NVIDIA_API_KEY)"
+            missing=1
+          fi
+          if [ -z "${OLLAMA_API_KEY:-}" ]; then
+            echo "::error::缺少必需机密 OLLAMA_API_KEY (Vault: ${VAULT_KV_OPENCLAW}/OLLAMA_API_KEY)"
+            missing=1
+          fi
+          [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 deploy"; exit 1; }
+
       - name: Download CMDB (host IP source)
         uses: actions/download-artifact@v4
         with:
@@ -315,6 +359,19 @@ jobs:
           secrets: |
             ${{ env.VAULT_KV }} CODEX_GITHUB_PERSONAL_ACCESS_TOKEN | INFRA_REPO_TOKEN ;
             ${{ env.VAULT_KV }} CLOUDFLARE_DNS_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN
+
+      - name: Validate required secrets
+        env:
+          CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_DNS_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 只校验 REQUIRED 机密非空（不打印任何值，仅判空）；INFRA_REPO_TOKEN 可选不校验。
+          missing=0
+          if [ -z "${CLOUDFLARE_DNS_API_TOKEN:-}" ]; then
+            echo "::error::缺少必需机密 CLOUDFLARE_DNS_API_TOKEN (Vault: ${VAULT_KV}/CLOUDFLARE_DNS_API_TOKEN)"
+            missing=1
+          fi
+          [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 dns"; exit 1; }
 
       - name: Checkout infra (playbooks)
         uses: actions/checkout@v4
