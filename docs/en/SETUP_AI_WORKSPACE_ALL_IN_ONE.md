@@ -27,26 +27,89 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
   GATEWAY_OPENCLAW_PUBLIC_ACCESS=false \
   VAULT_PUBLIC_ACCESS=false \
   LITELLM_API_CADDY_STRICT_WHITELIST=true \
-  TOKEN="your-unified-auth-token" \
+  AI_WORKSPACE_AUTH_TOKEN="your-unified-auth-token" \
   bash -
 ```
 
-## 3. Recommended Parameters
+> Subcommands are passed as positional args to `bash -`: `... | bash -s -- uninstall`.
 
-| Variable | Default | Recommended Use |
+## 3. Subcommands
+
+Passed as the first positional arg (`... | bash -s -- <subcommand>`).
+
+| Subcommand | Effect |
+| --- | --- |
+| `uninstall` | Stop & remove all AI Workspace apps/services (macOS launchd; Linux systemd units + docker containers). Config, tokens and data under `$HOME` are **kept**. |
+| `uninstall --purge` | Same teardown, then **delete** config/state/token/cache dirs (`~/.config/xworkspace`, `~/.local/state/xworkspace`, `~/.openclaw`, `~/.ai_workspace_auth_token`, `/tmp/ai-workspace-deploy`; plus `/opt/ai-workspace` & `/etc/ai-workspace` on Linux as root). Prints a plan first, reports each path removed/absent. |
+
+## 4. Optional Parameters (Environment Variables)
+
+Pass before `bash -`. Full set of supported options, grouped by purpose.
+
+### 4.1 Public Exposure & Security
+
+| Variable | Default | Notes |
 | --- | --- | --- |
-| `TOKEN` | generated or reused | Sets one unified auth token for Bridge, Portal, LiteLLM, OpenClaw, and Vault. |
-| `AI_WORKSPACE_SECURITY_LEVEL` | standard | Use `strict` for public or semi-public hosts. |
-| `XWORKMATE_BRIDGE_PUBLIC_ACCESS` | false | Enable only when the Bridge domain should be reachable from the Internet. |
-| `XWORKSPACE_CONSOLE_PUBLIC_ACCESS` | false | Enable only when the Portal must be public. Local-only is safer. |
-| `GATEWAY_OPENCLAW_PUBLIC_ACCESS` | false | Keep false unless OpenClaw must be exposed directly. |
-| `VAULT_PUBLIC_ACCESS` | false | Keep false for normal deployments. |
-| `LITELLM_API_CADDY_STRICT_WHITELIST` | false | Enable with strict deployments when LiteLLM is exposed through Caddy. |
-| `XWORKSPACE_CONSOLE_ENABLE_XRDP` | false | Enable only when remote desktop access is required. |
-| `XWORKMATE_BRIDGE_DOMAIN` | host-specific | Set the public Bridge domain, for example `acp-bridge.onwalk.net`. |
-| `AI_WORKSPACE_OFFLINE_PACKAGE` | none | Use a pre-downloaded offline package for installation (e.g., `/path/to/offline.tar.gz`). |
+| `AI_WORKSPACE_SECURITY_LEVEL` | `standard` | `strict` for public/semi-public hosts (locks down public web APIs). |
+| `XWORKMATE_BRIDGE_PUBLIC_ACCESS` | `false` | Expose Bridge via Caddy (typically the only public service on a public-IP host). |
+| `XWORKSPACE_CONSOLE_PUBLIC_ACCESS` | `false` | Expose Portal/Console. Local-only (`127.0.0.1:17000`) by default is safer. |
+| `GATEWAY_OPENCLAW_PUBLIC_ACCESS` | `false` | Expose the OpenClaw gateway. |
+| `VAULT_PUBLIC_ACCESS` | `false` | Keep false for normal deployments. |
+| `LITELLM_API_CADDY_STRICT_WHITELIST` | `false` | With strict + LiteLLM behind Caddy, restrict the public gateway path whitelist. |
+| `LITELLM_CADDY_CONFIG_ENABLED` | deployment-dependent | Whether to render a Caddy site for LiteLLM. |
+| `XWORKSPACE_CONSOLE_ENABLE_XRDP` | `false` | Install XRDP remote desktop (only if graphical remote needed). |
+| `XWORKMATE_BRIDGE_DOMAIN` | host-specific | Public Bridge domain, e.g. `acp-bridge.onwalk.net`. |
 
-## 4. Target Host Example
+### 4.2 Unified Auth Token
+
+First non-empty of: `AI_WORKSPACE_AUTH_TOKEN` → `XWORKSPACE_CONSOLE_AUTH_TOKEN` → `XWORKMATE_BRIDGE_AUTH_TOKEN` → `BRIDGE_AUTH_TOKEN` → `INTERNAL_SERVICE_TOKEN` → `DEPLOY_TOKEN` is used as the unified token (Bridge / LiteLLM / OpenClaw / Vault). If all unset it is **auto-generated** into `AI_WORKSPACE_AUTH_TOKEN_FILE` (default `~/.ai_workspace_auth_token`). The Vault root token can be set separately via `VAULT_SERVER_ROOT_ACCESS_TOKEN`.
+
+### 4.3 Runtime Modes
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `AI_WORKSPACE_RUNTIME_MODES` | `docker,systemd` | Runtime modes; `docker` and `k3s` are mutually exclusive. |
+| `POSTGRESQL_DEPLOY_MODE` | `compose` | `native` for apt/systemd. |
+
+### 4.4 Offline Package (acceleration / air-gap)
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `AI_WORKSPACE_OFFLINE_MODE` | `auto` | `auto` (try offline, fall back online) / `force` / `off`. |
+| `AI_WORKSPACE_OFFLINE_PACKAGE` | none | Local package file/dir or URL. |
+| `AI_WORKSPACE_OFFLINE_PACKAGE_URL` | none | Direct tarball URL. |
+| `AI_WORKSPACE_OFFLINE_PACKAGE_BASE_URL` | none | Mirror dir containing the target tarball; empty skips the mirror. |
+| `AI_WORKSPACE_OFFLINE_RELEASE_TAG` | `latest` | GitHub Release tag or `latest`. |
+| `AI_WORKSPACE_OFFLINE_REPO` | `ai-workspace-lab/xworkspace-console` | Repo hosting offline packages. |
+| `AI_WORKSPACE_OFFLINE_AUTO_DOWNLOAD` | `true` | In auto mode, fetch the matching package from GitHub Releases (reassembles split parts). |
+| `AI_WORKSPACE_OFFLINE_WORK_DIR` | `/tmp/ai-workspace-offline` | Extraction work dir. |
+
+> Source priority: `OFFLINE_PACKAGE` → `OFFLINE_PACKAGE_URL` → `OFFLINE_PACKAGE_BASE_URL/<file>` → else `AUTO_DOWNLOAD` via GitHub Releases. On failure falls back online per-OS (apt/yum or macOS homebrew + git clone + online runtime fetch).
+
+### 4.5 Performance / Concurrency / Locks
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `AI_WORKSPACE_PREFETCH_ENABLED` | `true` | Prefetch repos/components. |
+| `AI_WORKSPACE_PREFETCH_DIR` | `/var/tmp/ai-workspace-prefetch` | Prefetch dir. |
+| `AI_WORKSPACE_MAX_PARALLEL_JOBS` | `auto` | Concurrency cap (never exceeds 2× online CPU cores). |
+| `AI_WORKSPACE_SPLIT_PHASES` | `true` | Phased execution. |
+| `AI_WORKSPACE_RUNTIME_PREBUILD_ENABLED` | `false` | Prebuild runtime. |
+| `AI_WORKSPACE_DEPLOYMENT_LOCK_TIMEOUT` | `1800` | Deployment mutex wait (s). |
+| `AI_WORKSPACE_APT_LOCK_TIMEOUT` | `900` | Wait for dpkg/apt lock (s) (avoids racing cloud-init/unattended-upgrades). |
+
+### 4.6 Source/Version Overrides (dev & offline customization)
+
+| Variable | Notes |
+| --- | --- |
+| `PLAYBOOK_DIR` | Local playbooks checkout (handy for macOS validation). |
+| `XWORKSPACE_CONSOLE_DIR` | Local xworkspace-console checkout (macOS). |
+| `XWORKSPACE_CONSOLE_SOURCE_REPO` / `XWORKSPACE_CONSOLE_SOURCE_VERSION` | Git source/version for the Linux console playbook. |
+| `XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE` / `QMD_RUNTIME_ARCHIVE` | Prebuilt runtime tar paths (offline). |
+| `LITELLM_PACKAGE_SPEC` / `AI_WORKSPACE_PREBUILT_COMPONENTS_REQUIRED` | LiteLLM package spec / require prebuilt components. |
+| `OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC` / `OPENCLAW_MULTI_SESSION_PLUGIN_DIR` | OpenClaw plugin source / local checkout (macOS link install). |
+
+## 5. Target Host Example
 
 For the current ACP Bridge host:
 
@@ -58,7 +121,7 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
   bash -
 ```
 
-## 5. Expected Final Output
+## 6. Expected Final Output
 
 After a successful deployment, the script prints the deployed domain and token once, then reports service status for:
 
@@ -73,7 +136,7 @@ After a successful deployment, the script prints the deployed domain and token o
 
 Keep the token output private. It should not be copied into frontend source code or committed to Git.
 
-## 6. Local macOS Validation
+## 7. Local macOS Validation
 
 On macOS, the script defaults to local validation mode and starts the Portal at:
 
