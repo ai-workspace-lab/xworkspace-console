@@ -78,7 +78,12 @@ config/resources/ai-workspace-hosts.yaml        (IaC 声明, 唯一人工入口)
 - console(python 伺服）+ api(bin 路径）在两台全新主机直接 active、17000=200(此前 console 崩溃重启）。
 - **FQDN hostname** 在 ubuntu 实测生效;agent_skills 重构、lock_timeout(bridge/fail2ban）修复均已越过。
 
-**litellm / qmd:** 三处 package→apt(#8）修复让引导得以推进到 litellm/qmd 相位;`acp_server_opencode` 校验(#9）与 litellm×Py3.14(#10,uv 装 3.13）修复已入库。最近一次两台完整重跑仍以 `rc≠0` 收尾(失败点抓取因工具侧分类器中断未能即时定位）——litellm/qmd 全部 active 的最终确认,留待一次干净重跑/对最新失败点的定位。
+**litellm / qmd（最新轮）:** 修复推进显著——
+- **FQDN hostname 两台均生效**(`xworkmate-bridge-debian-13/ubuntu-26.svc.plus`)。
+- **debian13:litellm `:4000` 健康 200(已起）**,console/api active,openclaw activating。该机 `rc≠0` 的新因是某组件 **pinned SHA `236c83a5…` git 检出失败**(疑似强推/已删 commit;与本次部署修复无关,属组件版本钉点问题）。
+- **ubuntu26:litellm `:4000=000`(未起）**,uv-Py3.13(#10）后仍需定位(待查)。
+
+→ 即 console/api/FQDN/部分 litellm 已闭环;剩余两点(组件 SHA 检出、ubuntu litellm 收口)留待后续一次干净重跑定位。
 
 - deploy 流水线: `deploy-ai-workspace-iac.yaml` 的 deploy job 已改为"ssh 到主机本地跑 curl|bash 引导"(契合本地执行模型 + 离线加速),provision job 保留为批量起机模式;密钥经 Vault OIDC 取。
 
