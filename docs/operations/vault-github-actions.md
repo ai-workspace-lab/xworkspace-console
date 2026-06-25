@@ -95,3 +95,7 @@ vault write auth/jwt/role/github-actions-xworkspace-console \
 - role 不匹配 / `permission denied`：核对 OIDC `repository/sub` 与 role `bound_claims`，及 policy 是否含 `kv/data/CICD`。
 - `Load key ... error in libcrypto`：确认优先解码了 `SSH_PRIVATE_DEPLOY_KEY_B64`。
 - `Permission denied (publickey)`：确认 `SSH_PUBLIC_DEPLOY_KEY` 已进 hosts.yaml 并与私钥配对。
+
+## 7. 参考
+
+- 完整前置条件清单（含 TF state 后端搭建）：[iac-prerequisites.md](iac-prerequisites.md)

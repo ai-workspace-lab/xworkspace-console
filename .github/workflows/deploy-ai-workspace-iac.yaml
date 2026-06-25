@@ -3,6 +3,46 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 # =============================================================================
 # IaC ↔ Ansible 动态 inventory 联动的最终部署流水线（矩阵模式）
 #
+# ── TLDR 前置条件（首次运行必须全部就绪）────────────────────────────────────
+#
+#   1. Vault JWT auth（一次性，已存在）
+#      - auth/jwt 挂载，oidc_discovery_url = https://token.actions.githubusercontent.com
+#
+#   2. Vault role + policy（已创建）
+#      - policy: github-actions-xworkspace-console（读 kv/CICD + kv/openclaw）
+#      - role:   github-actions-xworkspace-console（JWT，bound 本仓库 OIDC）
+#      → 创建/校验命令见 docs/operations/vault-github-actions.md §2
+#
+#   3. Vault KV 必填键（vault kv patch kv/CICD ... / vault kv patch kv/openclaw ...）
+#      kv/CICD:
+#        VULTR_API_KEY              → Vultr 账号 API key（provision 创主机）
+#        SSH_PRIVATE_DEPLOY_KEY_B64 → 部署 SSH 私钥 base64（deploy 登录主机，优先）
+#        SSH_PRIVATE_DEPLOY_KEY     → 同上原始多行格式（回退，二选一必填）
+#        CLOUDFLARE_DNS_API_TOKEN   → CF Zone DNS Edit token（dns 同步）
+#      kv/openclaw:
+#        DEEPSEEK_API_KEY           → LLM provider key（deploy 注入主机）
+#        NVIDIA_API_KEY             → 同上
+#        OLLAMA_API_KEY             → 同上
+#
+#   4. Vault KV 可选键（不填则本地 state；生产建议填，防止 destroy 丢 state）
+#      kv/CICD:
+#        TF_STATE_ENDPOINT  → S3 兼容对象存储 API URL（如 https://ewr1.vultrobjects.com）
+#        TF_STATE_BUCKET    → bucket 名（如 ai-workspace-tfstate）
+#        TF_STATE_ACCESS_KEY / TF_STATE_SECRET_KEY → 对象存储凭据
+#        TF_STATE_REGION    → 地域（Vultr 填 us-east-1；Cloudflare R2 必须填 auto）
+#      → 对象存储搭建指南见 docs/operations/iac-prerequisites.md §3
+#
+#   5. ai-workspace-infra 私有仓库（可选加速）
+#      - kv/CICD.CODEX_GITHUB_PERSONAL_ACCESS_TOKEN → checkout iac_modules + playbooks
+#      - 不填则 actions/checkout 走公开访问（仓库须为 public）
+#
+#   6. SSH 公钥注入 infra hosts.yaml
+#      - SSH_PRIVATE_DEPLOY_KEY 对应的公钥须写入
+#        ai-workspace-infra/vultr-vps/config/resources/ai-workspace-hosts.yaml
+#        的 ssh_keys[].public，否则 Terraform 创机后 runner 无法 SSH 登录。
+#
+# ── 流水线结构 ───────────────────────────────────────────────────────────────
+#
 #   provision : 批量起机模式（开关：terraform_action=apply / run_deploy）。
 #               用 vultr-vps/envs/ai-workspace 创建主机（Python+Jinja2 渲染显式
 #               HCL，无 for_each），导出 cmdb.json + inventory.ini，并据此动态
@@ -18,12 +58,8 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 # (https://vault.svc.plus) KV 安全获取，认证走 GitHub OIDC（JWT，无静态 token）。
 #   - Vault 角色:   github-actions-xworkspace-console  (jwt auth, audience=vault)
 #   - KV 路径:      kv/data/CICD（共享 CICD 机密） + kv/data/openclaw（LLM keys）
-#   - 用到的键（详见 docs/operations/vault-github-actions.md）：
-#       [kv/CICD] VULTR_API_KEY                      → TF_VAR_vultr_api_key
-#       [kv/CICD] SSH_PRIVATE_DEPLOY_KEY[_B64]       → 连主机 SSH 私钥（B64 优先）
-#       [kv/CICD] CLOUDFLARE_DNS_API_TOKEN           → Cloudflare DNS 编辑
-#       [kv/openclaw] DEEPSEEK_API_KEY / NVIDIA_API_KEY / OLLAMA_API_KEY → LLM provider keys
-#       [kv/CICD] 可选远端 TF state：TF_STATE_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY/REGION
+#   - 详细说明:     docs/operations/vault-github-actions.md
+#                   docs/operations/iac-prerequisites.md
 # =============================================================================
 
 on:
@@ -176,7 +212,7 @@ jobs:
           set -euo pipefail
           if [ -n "${TF_STATE_BUCKET}" ]; then
             terraform init -input=false \
-              -backend-config="endpoints={s3=\"${TF_STATE_ENDPOINT}\"}" \
+              -backend-config="endpoints.s3=${TF_STATE_ENDPOINT}" \
               -backend-config="bucket=${TF_STATE_BUCKET}" \
               -backend-config="key=ai-workspace/terraform.tfstate" \
               -backend-config="region=${TF_STATE_REGION:-us-east-1}"
