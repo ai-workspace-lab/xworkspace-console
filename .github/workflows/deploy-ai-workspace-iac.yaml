@@ -342,31 +342,14 @@ jobs:
 
       - name: Run on-host bootstrap (curl | bash, local-mode install)
         env:
+          MATRIX_HOST: ${{ matrix.host }}
+          CMDB_PATH: cmdb/cmdb.json
+          SSH_KEY_PATH: ~/.ssh/id_deploy
+          XWORKMATE_BRIDGE_DOMAIN: ${{ github.event.inputs.bridge_domain }}
           DEEPSEEK_API_KEY: ${{ steps.vault.outputs.DEEPSEEK_API_KEY }}
           NVIDIA_API_KEY: ${{ steps.vault.outputs.NVIDIA_API_KEY }}
           OLLAMA_API_KEY: ${{ steps.vault.outputs.OLLAMA_API_KEY }}
-        run: |
-          set -euo pipefail
-          ip="$(jq -r '.["${{ matrix.host }}"].ip' cmdb/cmdb.json)"
-          user="$(jq -r '.["${{ matrix.host }}"].ansible_user // "root"' cmdb/cmdb.json)"
-          # bridge 域名 = operator 覆盖(input) 否则各主机 CMDB service_domains 的首个，
-          # 用作 /etc/hostname 与 xworkmate-bridge.caddy；on-host 模型拿不到 inventory，
-          # 故由流水线作为 XWORKMATE_BRIDGE_DOMAIN env 注入。
-          domain='${{ github.event.inputs.bridge_domain }}'
-          if [ -z "$domain" ]; then
-            domain="$(jq -r '.["${{ matrix.host }}"].host_vars.service_domains // ""' cmdb/cmdb.json | cut -d, -f1 | tr -d ' ')"
-          fi
-          echo "Bootstrapping ${{ matrix.host }} (${user}@${ip}) on-host, domain=${domain:-<none>} ..."
-          ssh -i ~/.ssh/id_deploy \
-            -o StrictHostKeyChecking=accept-new \
-            -o ServerAliveInterval=20 -o ServerAliveCountMax=15 \
-            -o ConnectTimeout=20 \
-            "${user}@${ip}" \
-            "XWORKMATE_BRIDGE_DOMAIN='${domain}' \
-             DEEPSEEK_API_KEY='${DEEPSEEK_API_KEY}' \
-             NVIDIA_API_KEY='${NVIDIA_API_KEY}' \
-             OLLAMA_API_KEY='${OLLAMA_API_KEY}' \
-             bash -lc 'curl -sfL https://install.svc.plus/ai-workspace | bash -'"
+        run: scripts/run-on-host-bootstrap.sh
 
   # ---------------------------------------------------------------------------
   dns:

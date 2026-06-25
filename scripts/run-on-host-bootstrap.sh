@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cmdb_path=${CMDB_PATH:-cmdb/cmdb.json}
+host=${MATRIX_HOST:?MATRIX_HOST is required}
+ssh_key=${SSH_KEY_PATH:-"$HOME/.ssh/id_deploy"}
+run_id=${GITHUB_RUN_ID:-manual}
+
+ip="$(jq -r --arg host "$host" '.[$host].ip' "$cmdb_path")"
+user="$(jq -r --arg host "$host" '.[$host].ansible_user // "root"' "$cmdb_path")"
+domain="${XWORKMATE_BRIDGE_DOMAIN:-}"
+if [ -z "$domain" ]; then
+  domain="$(jq -r --arg host "$host" '.[$host].host_vars.service_domains // ""' "$cmdb_path" | cut -d, -f1 | tr -d ' ')"
+fi
+
+if [ -z "$ip" ] || [ "$ip" = "null" ]; then
+  echo "::error::No IP found in ${cmdb_path} for ${host}" >&2
+  exit 1
+fi
+
+ssh_opts=(
+  -i "$ssh_key"
+  -o StrictHostKeyChecking=accept-new
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=60
+  -o ConnectTimeout=20
+  -o BatchMode=yes
+)
+
+remote_dir="/tmp/xworkspace-bootstrap-${run_id}-${host//[^A-Za-z0-9_.-]/_}"
+remote_env="${remote_dir}/env"
+remote_log="${remote_dir}/bootstrap.log"
+remote_rc="${remote_dir}/bootstrap.rc"
+remote_runner="${remote_dir}/run.sh"
+
+echo "Bootstrapping ${host} (${user}@${ip}) on-host, domain=${domain:-<none>} ..."
+
+remote_payload="$(mktemp)"
+trap 'rm -f "$remote_payload"' EXIT
+
+{
+  printf 'XWORKMATE_BRIDGE_DOMAIN=%q\n' "$domain"
+  printf 'DEEPSEEK_API_KEY=%q\n' "${DEEPSEEK_API_KEY:-}"
+  printf 'NVIDIA_API_KEY=%q\n' "${NVIDIA_API_KEY:-}"
+  printf 'OLLAMA_API_KEY=%q\n' "${OLLAMA_API_KEY:-}"
+} > "$remote_payload"
+
+ssh "${ssh_opts[@]}" "${user}@${ip}" "mkdir -p '$remote_dir' && chmod 700 '$remote_dir'"
+scp "${ssh_opts[@]}" "$remote_payload" "${user}@${ip}:${remote_env}" >/dev/null
+ssh "${ssh_opts[@]}" "${user}@${ip}" "chmod 600 '$remote_env'"
+
+ssh "${ssh_opts[@]}" "${user}@${ip}" "cat > '$remote_runner' && chmod 700 '$remote_runner'" <<'REMOTE_SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+remote_env=$1
+remote_log=$2
+remote_rc=$3
+if [ -f "$remote_rc" ]; then
+  exit 0
+fi
+(
+  set +e
+  source "$remote_env"
+  export XWORKMATE_BRIDGE_DOMAIN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY
+  bash -lc 'curl -sfL https://install.svc.plus/ai-workspace | bash -'
+  rc=$?
+  printf '%s\n' "$rc" > "$remote_rc"
+  exit "$rc"
+) > "$remote_log" 2>&1 &
+REMOTE_SCRIPT
+
+ssh "${ssh_opts[@]}" "${user}@${ip}" "nohup '$remote_runner' '$remote_env' '$remote_log' '$remote_rc' >/dev/null 2>&1 &"
+
+last_lines=0
+while true; do
+  poll_output="$(ssh "${ssh_opts[@]}" "${user}@${ip}" "if [ -f '$remote_log' ]; then wc -l < '$remote_log'; else echo 0; fi; if [ -f '$remote_rc' ]; then cat '$remote_rc'; else echo RUNNING; fi" 2>/dev/null || true)"
+  line_count="$(printf '%s\n' "$poll_output" | sed -n '1p')"
+  rc_value="$(printf '%s\n' "$poll_output" | sed -n '2p')"
+  case "$line_count" in
+    ''|*[!0-9]*) line_count=0 ;;
+  esac
+
+  if [ "$line_count" -gt "$last_lines" ]; then
+    start=$((last_lines + 1))
+    ssh "${ssh_opts[@]}" "${user}@${ip}" "sed -n '${start},${line_count}p' '$remote_log'" || true
+    last_lines="$line_count"
+  else
+    echo "[INFO] Bootstrap still running on ${host}; no new log lines."
+  fi
+
+  if [ "$rc_value" != "RUNNING" ] && [ -n "$rc_value" ]; then
+    if [ "$rc_value" = "0" ]; then
+      echo "[SUCCESS] Bootstrap completed on ${host}."
+      exit 0
+    fi
+    echo "::error::Bootstrap failed on ${host} with exit code ${rc_value}."
+    exit "$rc_value"
+  fi
+
+  sleep 20
+done
