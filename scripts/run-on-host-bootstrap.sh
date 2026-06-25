@@ -39,7 +39,12 @@ echo "Bootstrapping ${host} (${user}@${ip}) on-host, domain=${domain:-<none>} ..
 remote_payload="$(mktemp)"
 trap 'rm -f "$remote_payload"' EXIT
 
+# 离线包是按 release 快照打包的；当其落后于 playbooks main（如 Chrome 版本钉点、
+# postgres PGDATA 属主等已在 main 修复但未重新发包）时，默认 offline=auto 会用到
+# 过期 playbook 导致部署失败。默认 off，让 on-host 引导在线 git clone 最新 main；
+# 待离线包重新发布后可改回 auto 以恢复离线加速。
 {
+  printf 'AI_WORKSPACE_OFFLINE_MODE=%q\n' "${AI_WORKSPACE_OFFLINE_MODE:-off}"
   printf 'XWORKMATE_BRIDGE_DOMAIN=%q\n' "$domain"
   printf 'DEEPSEEK_API_KEY=%q\n' "${DEEPSEEK_API_KEY:-}"
   printf 'NVIDIA_API_KEY=%q\n' "${NVIDIA_API_KEY:-}"
@@ -62,7 +67,7 @@ fi
 (
   set +e
   source "$remote_env"
-  export XWORKMATE_BRIDGE_DOMAIN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY
+  export AI_WORKSPACE_OFFLINE_MODE XWORKMATE_BRIDGE_DOMAIN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY
   bash -lc 'curl -sfL https://install.svc.plus/ai-workspace | bash -'
   rc=$?
   printf '%s\n' "$rc" > "$remote_rc"

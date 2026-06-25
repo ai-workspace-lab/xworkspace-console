@@ -76,6 +76,12 @@ on:
         required: false
         default: ""
         type: string
+      offline_mode:
+        description: "on-host 离线包模式: off=在线拉最新 main(默认,离线包落后时用); auto=离线加速; force=强制离线"
+        required: false
+        default: "off"
+        type: choice
+        options: ["off", "auto", "force"]
       terraform_action:
         description: "apply 创建/更新，destroy 销毁"
         required: false
@@ -359,6 +365,9 @@ jobs:
           MATRIX_HOST: ${{ matrix.host }}
           CMDB_PATH: cmdb/cmdb.json
           SSH_KEY_PATH: ~/.ssh/id_deploy
+          # 离线包落后于 main 时用在线模式拉最新 playbook（见 run-on-host-bootstrap.sh）。
+          # 离线包重新发布后可设为 auto 恢复离线加速。
+          AI_WORKSPACE_OFFLINE_MODE: ${{ github.event.inputs.offline_mode || 'off' }}
           XWORKMATE_BRIDGE_DOMAIN: ${{ github.event.inputs.bridge_domain }}
           DEEPSEEK_API_KEY: ${{ steps.vault.outputs.DEEPSEEK_API_KEY }}
           NVIDIA_API_KEY: ${{ steps.vault.outputs.NVIDIA_API_KEY }}
