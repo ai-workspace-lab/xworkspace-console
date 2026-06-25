@@ -919,7 +919,12 @@ try_bootstrap_from_offline_package() {
         return 0
     fi
 
-    error "Offline package installer failed after making deployment changes; online fallback was not started."
+    if offline_mode_is_force; then
+        error "Offline package installer failed after making deployment changes."
+    fi
+
+    warn "Offline package installer failed after making deployment changes; falling back to online bootstrap."
+    return 1
 }
 
 linux_default_console_user() {
