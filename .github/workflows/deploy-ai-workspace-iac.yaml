@@ -181,11 +181,16 @@ jobs:
       - name: Configure remote backend (optional)
         if: ${{ steps.vault.outputs.TF_STATE_BUCKET != '' }}
         working-directory: ${{ env.ENV_DIR }}
+        env:
+          TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
         run: |
           set -euo pipefail
-          cat > backend.tf <<'EOF'
+          # endpoints 块只能在 HCL 里配置，无法通过 -backend-config flag 传递。
+          # 用非引号 heredoc 将 endpoint URL 直接写入 backend.tf。
+          cat > backend.tf <<EOF
           terraform {
             backend "s3" {
+              endpoints = { s3 = "${TF_STATE_ENDPOINT}" }
               skip_credentials_validation = true
               skip_region_validation      = true
               skip_requesting_account_id  = true
@@ -212,7 +217,6 @@ jobs:
           set -euo pipefail
           if [ -n "${TF_STATE_BUCKET}" ]; then
             terraform init -input=false \
-              -backend-config="endpoints.s3=${TF_STATE_ENDPOINT}" \
               -backend-config="bucket=${TF_STATE_BUCKET}" \
               -backend-config="key=ai-workspace/terraform.tfstate" \
               -backend-config="region=${TF_STATE_REGION:-us-east-1}"
