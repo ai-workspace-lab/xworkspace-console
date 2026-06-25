@@ -203,7 +203,7 @@ jobs:
             terraform init -input=false \
               -backend-config="bucket=${TF_STATE_BUCKET}" \
               -backend-config="key=ai-workspace/terraform.tfstate" \
-              -backend-config="region=${TF_STATE_REGION:-us-east-1}"
+              -backend-config="region=${TF_STATE_REGION:-auto}"
           else
             echo "::warning::未配置远端 state(Vault 无 TF_STATE_BUCKET)，使用本地 state（仅适合一次性演示，destroy 需同一次运行）"
             terraform init -input=false
