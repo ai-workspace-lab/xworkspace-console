@@ -28,19 +28,16 @@ run: |
 **正确做法：外置脚本，workflow 只做调用。**
 
 ```yaml
-# ✅ 正确 — 外置 Python 脚本
-- name: Checkout xworkspace-console (scripts)
-  uses: actions/checkout@v4
-  with:
-    path: xw-console
-
+# ✅ 正确 — 外置 Python 脚本（放在 infra repo，通过已有 checkout 引用）
 - name: Configure remote backend
   env:
     TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
-  run: python3 $GITHUB_WORKSPACE/xw-console/scripts/render_backend_tf.py backend.tf
+  run: python3 $GITHUB_WORKSPACE/${{ env.VPS_ROOT }}/scripts/render_backend_tf.py backend.tf
 ```
 
-脚本存放在 `scripts/` 目录，命名规范 `动词_名词.py` 或 `动词-名词.sh`。
+渲染脚本存放在 `ai-workspace-infra/iac_modules/terraform-hcl-standard/vultr-vps/scripts/`，
+通过 workflow 内已有的 `Checkout iac_modules` 步骤引用，无需额外 self-checkout。
+workflow 内的 `run:` 块调用外置脚本，命名规范 `动词_名词.py` 或 `动词-名词.sh`。
 
 ### 其他规范
 

@@ -153,11 +153,6 @@ jobs:
           fi
           [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 provision"; exit 1; }
 
-      - name: Checkout xworkspace-console (scripts)
-        uses: actions/checkout@v4
-        with:
-          path: xw-console
-
       - name: Checkout iac_modules
         uses: actions/checkout@v4
         with:
@@ -188,7 +183,7 @@ jobs:
         working-directory: ${{ env.ENV_DIR }}
         env:
           TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
-        run: python3 $GITHUB_WORKSPACE/xw-console/scripts/render_backend_tf.py backend.tf
+        run: python3 $GITHUB_WORKSPACE/${{ env.VPS_ROOT }}/scripts/render_backend_tf.py backend.tf
 
       - name: generate.py render (YAML -> 显式 HCL + tfvars)
         working-directory: ${{ env.VPS_ROOT }}
