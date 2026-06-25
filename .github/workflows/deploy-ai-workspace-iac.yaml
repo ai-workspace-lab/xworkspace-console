@@ -186,20 +186,27 @@ jobs:
         run: |
           set -euo pipefail
           # endpoints 块只能在 HCL 里配置，无法通过 -backend-config flag 传递。
-          # 用非引号 heredoc 将 endpoint URL 直接写入 backend.tf。
-          cat > backend.tf <<EOF
-          terraform {
-            backend "s3" {
-              endpoints = { s3 = "${TF_STATE_ENDPOINT}" }
-              skip_credentials_validation = true
-              skip_region_validation      = true
-              skip_requesting_account_id  = true
-              skip_metadata_api_check     = true
-              skip_s3_checksum            = true
-              force_path_style            = true
-            }
-          }
-          EOF
+          # 用 Jinja2 渲染 backend.tf，避免 shell heredoc 的引号/转义问题。
+          python3 - <<'PYEOF'
+import os, jinja2
+tmpl = jinja2.Template("""\
+terraform {
+  backend "s3" {
+    endpoints                   = { s3 = "{{ endpoint }}" }
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+  }
+}
+""")
+out = tmpl.render(endpoint=os.environ["TF_STATE_ENDPOINT"])
+with open("backend.tf", "w") as f:
+    f.write(out)
+print("backend.tf rendered, endpoint=" + os.environ["TF_STATE_ENDPOINT"][:30] + "...")
+PYEOF
 
       - name: generate.py render (YAML -> 显式 HCL + tfvars)
         working-directory: ${{ env.VPS_ROOT }}
