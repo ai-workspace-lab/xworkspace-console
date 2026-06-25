@@ -55,7 +55,6 @@ vault write auth/jwt/role/github-actions-xworkspace-console \
 | Vault 路径 | 键 | 映射到输出 | 用途 |
 | --- | --- | --- | --- |
 | `kv/data/CICD` | `VULTR_API_KEY` | `VULTR_API_KEY` | provision：`TF_VAR_vultr_api_key` |
-| `kv/data/CICD` | `CODEX_GITHUB_PERSONAL_ACCESS_TOKEN` | `INFRA_REPO_TOKEN` | checkout 私有 `ai-workspace-infra` |
 | `kv/data/CICD` | `CLOUDFLARE_DNS_API_TOKEN` | `CLOUDFLARE_DNS_API_TOKEN` | dns：Cloudflare DNS 编辑 |
 | `kv/data/CICD` | `SSH_PRIVATE_DEPLOY_KEY_B64` | `ANSIBLE_SSH_KEY_B64` | 连主机 SSH 私钥（**优先**，单行 base64） |
 | `kv/data/CICD` | `SSH_PRIVATE_DEPLOY_KEY` | `ANSIBLE_SSH_KEY` | 同上原始多行（回退） |
