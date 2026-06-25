@@ -153,6 +153,11 @@ jobs:
           fi
           [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 provision"; exit 1; }
 
+      - name: Checkout xworkspace-console (scripts)
+        uses: actions/checkout@v4
+        with:
+          path: xw-console
+
       - name: Checkout iac_modules
         uses: actions/checkout@v4
         with:
@@ -183,23 +188,7 @@ jobs:
         working-directory: ${{ env.ENV_DIR }}
         env:
           TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
-        run: |
-          set -euo pipefail
-          # endpoints 块只能在 HCL 里配置，无法通过 -backend-config flag 传递。
-          # 用非引号 heredoc 将 endpoint URL 展开写入 backend.tf。
-          cat > backend.tf << TFEOF
-          terraform {
-            backend "s3" {
-              endpoints                   = { s3 = "${TF_STATE_ENDPOINT}" }
-              skip_credentials_validation = true
-              skip_region_validation      = true
-              skip_requesting_account_id  = true
-              skip_metadata_api_check     = true
-              skip_s3_checksum            = true
-              use_path_style              = true
-            }
-          }
-          TFEOF
+        run: python3 $GITHUB_WORKSPACE/xw-console/scripts/render_backend_tf.py backend.tf
 
       - name: generate.py render (YAML -> 显式 HCL + tfvars)
         working-directory: ${{ env.VPS_ROOT }}
