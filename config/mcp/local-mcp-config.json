@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "/Users/shenlan/workspaces/ai-workspace-lab/xworkspace-console/config/mcp/bin/github-mcp-server.sh"
+    },
+    "terraform": {
+      "command": "/Users/shenlan/workspaces/ai-workspace-lab/xworkspace-console/config/mcp/bin/terraform-mcp-server.sh"
+    },
+    "ssh-manager": {
+      "command": "/Users/shenlan/workspaces/ai-workspace-lab/xworkspace-console/config/mcp/bin/mcp-ssh-manager.sh"
+    }
+  }
+}
