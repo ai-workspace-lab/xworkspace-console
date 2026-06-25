@@ -304,6 +304,9 @@ jobs:
           fi
           [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 deploy"; exit 1; }
 
+      - name: Checkout xworkspace-console helpers
+        uses: actions/checkout@v4
+
       - name: Download CMDB (host IP source)
         uses: actions/download-artifact@v4
         with:
@@ -349,7 +352,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ steps.vault.outputs.DEEPSEEK_API_KEY }}
           NVIDIA_API_KEY: ${{ steps.vault.outputs.NVIDIA_API_KEY }}
           OLLAMA_API_KEY: ${{ steps.vault.outputs.OLLAMA_API_KEY }}
-        run: scripts/run-on-host-bootstrap.sh
+        run: bash scripts/run-on-host-bootstrap.sh
 
   # ---------------------------------------------------------------------------
   dns:

@@ -4,6 +4,7 @@ set -euo pipefail
 cmdb_path=${CMDB_PATH:-cmdb/cmdb.json}
 host=${MATRIX_HOST:?MATRIX_HOST is required}
 ssh_key=${SSH_KEY_PATH:-"$HOME/.ssh/id_deploy"}
+ssh_key="${ssh_key/#\~/$HOME}"
 run_id=${GITHUB_RUN_ID:-manual}
 
 ip="$(jq -r --arg host "$host" '.[$host].ip' "$cmdb_path")"
