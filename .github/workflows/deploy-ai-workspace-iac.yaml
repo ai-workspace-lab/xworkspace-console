@@ -18,7 +18,8 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 #        VULTR_API_KEY              → Vultr 账号 API key（provision 创主机）
 #        SSH_PRIVATE_DEPLOY_KEY_B64 → 部署 SSH 私钥 base64（deploy 登录主机，优先）
 #        SSH_PRIVATE_DEPLOY_KEY     → 同上原始多行格式（回退，二选一必填）
-#        CLOUDFLARE_DNS_API_TOKEN   → CF Zone DNS Edit token（dns 同步）
+#        CLOUDFLARE_DNS_API_TOKEN   → CF Zone DNS Edit token（dns 同步，兼容旧名）
+#        CLOUDFLARE_API_TOKEN       → 同上，Cloudflare 角色兼容别名
 #      kv/openclaw:
 #        DEEPSEEK_API_KEY           → LLM provider key（deploy 注入主机）
 #        NVIDIA_API_KEY             → 同上
@@ -146,7 +147,7 @@ jobs:
     steps:
       - name: Load Vault secrets (OIDC)
         id: vault
-        uses: hashicorp/vault-action@v2
+        uses: hashicorp/vault-action@v4
         with:
           url: ${{ env.VAULT_ADDR }}
           method: jwt
@@ -159,7 +160,9 @@ jobs:
             ${{ env.VAULT_KV }} TF_STATE_BUCKET | TF_STATE_BUCKET ;
             ${{ env.VAULT_KV }} TF_STATE_ACCESS_KEY | TF_STATE_ACCESS_KEY ;
             ${{ env.VAULT_KV }} TF_STATE_SECRET_KEY | TF_STATE_SECRET_KEY ;
-            ${{ env.VAULT_KV }} TF_STATE_REGION | TF_STATE_REGION
+            ${{ env.VAULT_KV }} TF_STATE_REGION | TF_STATE_REGION ;
+            ${{ env.VAULT_KV }} CLOUDFLARE_DNS_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN ;
+            ${{ env.VAULT_KV }} CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
 
       - name: Validate required secrets
         env:
@@ -169,6 +172,8 @@ jobs:
           TF_STATE_ACCESS_KEY: ${{ steps.vault.outputs.TF_STATE_ACCESS_KEY }}
           TF_STATE_SECRET_KEY: ${{ steps.vault.outputs.TF_STATE_SECRET_KEY }}
           TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
+          CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_DNS_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           # 校验 REQUIRED 机密非空（不打印任何值，仅判空）。
@@ -187,14 +192,14 @@ jobs:
           [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 provision"; exit 1; }
 
       - name: Checkout iac_modules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ai-workspace-infra/iac_modules
           ref: ${{ github.event.inputs.infra_ref || 'main' }}
           path: infra/iac_modules
 
       - name: Checkout playbooks
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ai-workspace-infra/playbooks
           ref: ${{ github.event.inputs.infra_ref || 'main' }}
@@ -204,7 +209,7 @@ jobs:
         with:
           terraform_version: "1.9.8"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -274,7 +279,7 @@ jobs:
 
       - name: Upload CMDB + inventory artifact
         if: ${{ (github.event.inputs.terraform_action || 'apply') == 'apply' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ai-workspace-cmdb
           path: |
@@ -299,7 +304,7 @@ jobs:
       # 跑官方引导脚本——与用户 self-host 的 curl|bash 完全同一路径。
       - name: Load Vault secrets (OIDC)
         id: vault
-        uses: hashicorp/vault-action@v2
+        uses: hashicorp/vault-action@v4
         with:
           url: ${{ env.VAULT_ADDR }}
           method: jwt
@@ -351,10 +356,10 @@ jobs:
           [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 deploy"; exit 1; }
 
       - name: Checkout xworkspace-console helpers
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download CMDB (host IP source)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ai-workspace-cmdb
           path: cmdb
@@ -412,7 +417,7 @@ jobs:
     steps:
       - name: Load Vault secrets (OIDC)
         id: vault
-        uses: hashicorp/vault-action@v2
+        uses: hashicorp/vault-action@v4
         with:
           url: ${{ env.VAULT_ADDR }}
           method: jwt
@@ -420,35 +425,37 @@ jobs:
           jwtGithubAudience: vault
           ignoreNotFound: true
           secrets: |
-            ${{ env.VAULT_KV }} CLOUDFLARE_DNS_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN
+            ${{ env.VAULT_KV }} CLOUDFLARE_DNS_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN ;
+            ${{ env.VAULT_KV }} CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
 
       - name: Validate required secrets
         env:
           CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_DNS_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           # 只校验 REQUIRED 机密非空（不打印任何值，仅判空）；INFRA_REPO_TOKEN 可选不校验。
           missing=0
-          if [ -z "${CLOUDFLARE_DNS_API_TOKEN:-}" ]; then
+          if [ -z "${CLOUDFLARE_DNS_API_TOKEN:-}" ] && [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
             echo "::error::缺少必需机密 CLOUDFLARE_DNS_API_TOKEN (Vault: ${VAULT_KV}/CLOUDFLARE_DNS_API_TOKEN)"
             missing=1
           fi
           [ "$missing" -eq 0 ] || { echo "::error::必需机密缺失，终止 dns"; exit 1; }
 
       - name: Checkout playbooks
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ai-workspace-infra/playbooks
           ref: ${{ github.event.inputs.infra_ref || 'main' }}
           path: infra/playbooks
 
       - name: Download CMDB + inventory
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ai-workspace-cmdb
           path: cmdb
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -459,6 +466,7 @@ jobs:
         working-directory: ${{ env.PLAYBOOKS_DIR }}
         env:
           CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_DNS_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           # 只为本次新建的 ai_workspace 组主机同步 A 记录（域名取各主机
