@@ -241,6 +241,9 @@ jobs:
       - name: generate.py inventory (terraform output + YAML -> cmdb.json + inventory.ini)
         if: ${{ (github.event.inputs.terraform_action || 'apply') == 'apply' }}
         working-directory: ${{ env.VPS_ROOT }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.vault.outputs.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.vault.outputs.TF_STATE_SECRET_KEY }}
         run: python3 scripts/generate.py inventory
 
       - name: Build deploy matrix from cmdb.json
