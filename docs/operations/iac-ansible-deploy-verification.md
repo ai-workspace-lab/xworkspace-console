@@ -53,6 +53,8 @@ config/resources/ai-workspace-hosts.yaml        (IaC 声明, 唯一人工入口)
 | 9 | `acp_server_opencode` ACP 端点校验超时 | 服务(重)启后 ~1s 即探测,adapter 已 accept TCP 但未应答;`uri` 默认 30s + `retries/until` 在连接超时上未真正循环,一次即败 | 改为 **curl 重试循环**(每次 5s、最多 ~30 次);adapter 就绪后 `acp.capabilities` ~4ms 回 200 |
 | 10 | litellm × Python 3.14(仅 Ubuntu 26.04) | pinned litellm fork 要求 `<3.14`,Ubuntu 26.04 系统 py=3.14 且 apt 无 3.13/3.12 → `pip install` 报 "requires a different Python" | 系统解释器 ≥3.14 时用 **`uv` 装独立 Python 3.13** 重建 venv;Debian 13(3.13)不受影响 |
 | 11 | `inventory_hostname` 硬编码短名/127.0.0.1 | 主机标识/hostname/caddy 站点名错位 | `generate.py` 以 `service_domains` 首个 **FQDN** 为 CMDB/inventory 键;`.sh` on-host 的 `-i` 用 FQDN;bridge 角色据此设 `/etc/hostname` 与 caddy 站点名 |
+| 12 | `nodejs_version` 自引用(Ansible 2.19 递归) | xfce include nodejs 角色传 `nodejs_version: "{{ ai_agent_runtime_nodejs_version \| default(nodejs_version) }}"`,2.19+ 惰性模板判定 `Recursive loop detected` → `nodejs_version_major` set_fact 失败 | 改显式回退 `default('22.22.3', true)`。**坑**:`default(omit)` 在 include_role vars 里不回退角色默认而是塞入 omit 占位符,渲染成 `node_<<Omit>>.x` 仓库地址致 apt update 失败 |
+| 13 | 浏览器 resolver 选中 disabled stub | ai_agent_runtime resolver 仅以 `command -v`/`-x` 判存在,选中 xfce 装的 `/usr/local/bin/chromium` 禁用 stub(退出 126)而非 google-chrome → `Check chromium version` rc=126 失败(再次运行/角色顺序触发) | resolver 增加 `<candidate> --version` 实跑校验,跳过 stub,解析到 google-chrome |
 
 部署侧加固(长途控制连接稳定性): `ANSIBLE_SSH_ARGS` 加 `ServerAliveInterval/ControlPersist`, `ANSIBLE_SSH_RETRIES`。
 
@@ -78,12 +80,16 @@ config/resources/ai-workspace-hosts.yaml        (IaC 声明, 唯一人工入口)
 - console(python 伺服）+ api(bin 路径）在两台全新主机直接 active、17000=200(此前 console 崩溃重启）。
 - **FQDN hostname** 在 ubuntu 实测生效;agent_skills 重构、lock_timeout(bridge/fail2ban）修复均已越过。
 
-**litellm / qmd（最新轮）:** 修复推进显著——
-- **FQDN hostname 两台均生效**(`xworkmate-bridge-debian-13/ubuntu-26.svc.plus`)。
-- **debian13:litellm `:4000` 健康 200(已起）**,console/api active,openclaw activating。该机 `rc≠0` 的新因是某组件 **pinned SHA `236c83a5…` git 检出失败**(疑似强推/已删 commit;与本次部署修复无关,属组件版本钉点问题）。
-- **ubuntu26:litellm `:4000=000`(未起）**,uv-Py3.13(#10）后仍需定位(待查)。
+**最终干净一轮(IaC 起机 → on-host `curl|bash` → 两台 `RC=0`)—— 全绿:**
 
-→ 即 console/api/FQDN/部分 litellm 已闭环;剩余两点(组件 SHA 检出、ubuntu litellm 收口)留待后续一次干净重跑定位。
+| 平台 | hostname | curl\|bash | 17000(console) | 8788(api) | 4000(litellm) | caddy |
+|------|----------|-----------|----------------|-----------|---------------|-------|
+| debian13 | `xworkmate-bridge-debian-13.svc.plus` ✓ | **RC=0** | 200 | up(404 无根路由) | **200 `"I'm alive!"`** | active |
+| ubuntu26.04 | `xworkmate-bridge-ubuntu-26.svc.plus` ✓ | **RC=0** | 200 | up | **200 `"I'm alive!"`**(uv-Py3.13 #10 生效) | active |
+
+- 运行单元:`caddy.service` / `litellm-proxy.service` / `xworkmate-bridge.service`(console/api 在各自端口应答)。
+- **#12 nodejs 递归 + #13 resolver stub** 是本轮新定位并修复的两处(均在活跃部署路径,非脏机伪症);叠加 #1–#11 后两台一次性 `RC=0`。
+- 验证完即 `terraform destroy`(2 instance + ssh key,Vultr API 复核 instances=0,零计费残留)。
 
 - deploy 流水线: `deploy-ai-workspace-iac.yaml` 的 deploy job 已改为"ssh 到主机本地跑 curl|bash 引导"(契合本地执行模型 + 离线加速),provision job 保留为批量起机模式;密钥经 Vault OIDC 取。
 
