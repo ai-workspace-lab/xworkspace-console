@@ -231,6 +231,8 @@ jobs:
       - name: Terraform ${{ github.event.inputs.terraform_action || 'apply' }}
         working-directory: ${{ env.ENV_DIR }}
         env:
+          AWS_ACCESS_KEY_ID: ${{ steps.vault.outputs.TF_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.vault.outputs.TF_STATE_SECRET_KEY }}
           TF_VAR_vultr_api_key: ${{ steps.vault.outputs.VULTR_API_KEY }}
         run: |
           set -euo pipefail
