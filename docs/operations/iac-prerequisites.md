@@ -107,6 +107,10 @@ vault kv patch kv/CICD \
   ```
 - 填入 `TF_STATE_ENDPOINT=https://ewr1.vultrobjects.com`，`TF_STATE_REGION=us-east-1`
 
+**AWS S3**
+- 如果后端是 AWS S3 标准 bucket，`TF_STATE_ENDPOINT` 通常直接填 S3 API endpoint，例如 `https://s3.us-east-1.amazonaws.com`
+- `TF_STATE_REGION` 需要与 bucket 所在区域一致；对 `ai-workspace-tfstate` 这类 us-east-1 bucket，填 `us-east-1`
+
 **Cloudflare R2**（已在用 CF，无出口流量费）：
 - 控制台 → R2 → 建 bucket → Manage API Tokens → 建读写 token
 - `TF_STATE_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com`

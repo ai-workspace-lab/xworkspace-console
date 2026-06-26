@@ -224,7 +224,7 @@ jobs:
           terraform init -input=false \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="key=ai-workspace/terraform.tfstate" \
-            -backend-config="region=${TF_STATE_REGION:-auto}"
+            -backend-config="region=${TF_STATE_REGION:-us-east-1}"
 
       - name: Terraform ${{ github.event.inputs.terraform_action || 'apply' }}
         working-directory: ${{ env.ENV_DIR }}
