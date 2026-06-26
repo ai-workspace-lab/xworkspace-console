@@ -98,6 +98,21 @@ on:
         required: false
         default: true
         type: boolean
+      use_deepseek:
+        description: "是否接入 DeepSeek API key"
+        required: false
+        default: true
+        type: boolean
+      use_nvidia:
+        description: "是否接入 NVIDIA API key"
+        required: false
+        default: true
+        type: boolean
+      use_ollama:
+        description: "是否接入 Ollama API key"
+        required: false
+        default: true
+        type: boolean
 
 # id-token: write 用于 Vault 的 GitHub OIDC(JWT) 认证；contents: read 拉代码
 permissions:
@@ -298,13 +313,20 @@ jobs:
             ${{ env.VAULT_KV_OPENCLAW }} NVIDIA_API_KEY | NVIDIA_API_KEY ;
             ${{ env.VAULT_KV_OPENCLAW }} OLLAMA_API_KEY | OLLAMA_API_KEY
 
+      - name: Report provider key wiring
+        run: |
+          set -euo pipefail
+          echo "DeepSeek: ${{ github.event.inputs.use_deepseek == 'false' && 'skipped' || 'enabled' }}"
+          echo "NVIDIA: ${{ github.event.inputs.use_nvidia == 'false' && 'skipped' || 'enabled' }}"
+          echo "Ollama: ${{ github.event.inputs.use_ollama == 'false' && 'skipped' || 'enabled' }}"
+
       - name: Validate required secrets
         env:
           ANSIBLE_SSH_KEY: ${{ steps.vault.outputs.ANSIBLE_SSH_KEY }}
           ANSIBLE_SSH_KEY_B64: ${{ steps.vault.outputs.ANSIBLE_SSH_KEY_B64 }}
-          DEEPSEEK_API_KEY: ${{ steps.vault.outputs.DEEPSEEK_API_KEY }}
-          NVIDIA_API_KEY: ${{ steps.vault.outputs.NVIDIA_API_KEY }}
-          OLLAMA_API_KEY: ${{ steps.vault.outputs.OLLAMA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ github.event.inputs.use_deepseek == 'false' && '' || steps.vault.outputs.DEEPSEEK_API_KEY }}
+          NVIDIA_API_KEY: ${{ github.event.inputs.use_nvidia == 'false' && '' || steps.vault.outputs.NVIDIA_API_KEY }}
+          OLLAMA_API_KEY: ${{ github.event.inputs.use_ollama == 'false' && '' || steps.vault.outputs.OLLAMA_API_KEY }}
         run: |
           set -euo pipefail
           # 只校验 REQUIRED 机密非空（不打印任何值，仅判空）。
@@ -314,15 +336,15 @@ jobs:
             echo "::error::缺少必需机密 SSH 私钥 (Vault: ${VAULT_KV}/SSH_PRIVATE_DEPLOY_KEY_B64 或 ${VAULT_KV}/SSH_PRIVATE_DEPLOY_KEY，至少一个)"
             missing=1
           fi
-          if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+          if [ "${{ github.event.inputs.use_deepseek || 'true' }}" = "true" ] && [ -z "${DEEPSEEK_API_KEY:-}" ]; then
             echo "::error::缺少必需机密 DEEPSEEK_API_KEY (Vault: ${VAULT_KV_OPENCLAW}/DEEPSEEK_API_KEY)"
             missing=1
           fi
-          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+          if [ "${{ github.event.inputs.use_nvidia || 'true' }}" = "true" ] && [ -z "${NVIDIA_API_KEY:-}" ]; then
             echo "::error::缺少必需机密 NVIDIA_API_KEY (Vault: ${VAULT_KV_OPENCLAW}/NVIDIA_API_KEY)"
             missing=1
           fi
-          if [ -z "${OLLAMA_API_KEY:-}" ]; then
+          if [ "${{ github.event.inputs.use_ollama || 'true' }}" = "true" ] && [ -z "${OLLAMA_API_KEY:-}" ]; then
             echo "::error::缺少必需机密 OLLAMA_API_KEY (Vault: ${VAULT_KV_OPENCLAW}/OLLAMA_API_KEY)"
             missing=1
           fi
@@ -376,9 +398,9 @@ jobs:
           # 离线包重新发布后可设为 auto 恢复离线加速。
           AI_WORKSPACE_OFFLINE_MODE: ${{ github.event.inputs.offline_mode || 'off' }}
           XWORKMATE_BRIDGE_DOMAIN: ${{ github.event.inputs.bridge_domain }}
-          DEEPSEEK_API_KEY: ${{ steps.vault.outputs.DEEPSEEK_API_KEY }}
-          NVIDIA_API_KEY: ${{ steps.vault.outputs.NVIDIA_API_KEY }}
-          OLLAMA_API_KEY: ${{ steps.vault.outputs.OLLAMA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ github.event.inputs.use_deepseek == 'false' && '' || steps.vault.outputs.DEEPSEEK_API_KEY }}
+          NVIDIA_API_KEY: ${{ github.event.inputs.use_nvidia == 'false' && '' || steps.vault.outputs.NVIDIA_API_KEY }}
+          OLLAMA_API_KEY: ${{ github.event.inputs.use_ollama == 'false' && '' || steps.vault.outputs.OLLAMA_API_KEY }}
         run: bash scripts/run-on-host-bootstrap.sh
 
   # ---------------------------------------------------------------------------
