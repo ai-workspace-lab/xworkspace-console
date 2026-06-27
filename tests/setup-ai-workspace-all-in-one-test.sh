@@ -217,6 +217,39 @@ test_linux_identity_vars_can_be_overridden() (
     printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkspace_console_repo_dir=/srv/deploy/xworkspace-console$' || fail "console repo extra var missing"
 )
 
+test_provider_api_keys_use_secret_logging() {
+    local env_name ansible_var
+    while read -r env_name ansible_var; do
+        grep -Fq "append_secret_var \"$ansible_var\" \"\${$env_name:-}\"" "$BOOTSTRAP" ||
+            fail "$env_name is not passed through the masked secret logger"
+        if grep -Fq "append_var \"$env_name\"" "$BOOTSTRAP"; then
+            fail "$env_name is still passed through the plain-text parameter logger"
+        fi
+    done <<'EOF'
+DEEPSEEK_API_KEY litellm_deepseek_api_key
+NVIDIA_API_KEY litellm_nvidia_api_key
+OLLAMA_API_KEY litellm_ollama_api_key
+GEMINI_API_KEY litellm_gemini_api_key
+OPENAI_API_KEY litellm_openai_api_key
+ANTHROPIC_API_KEY litellm_anthropic_api_key
+EOF
+}
+
+test_macos_plugin_patch_uses_stable_directory() {
+    local patcher="$SCRIPT_DIR/../scripts/patch-macos-playbooks.py"
+    grep -Fq 'Remove legacy temporary plugin symlink (macOS)' "$patcher" ||
+        fail "macOS plugin patch does not migrate the legacy temporary symlink"
+    grep -Fq 'Ensure stable openclaw-multi-session-plugins directory (macOS)' "$patcher" ||
+        fail "macOS plugin patch does not create a stable extension directory"
+    grep -Fq 'Copy built openclaw-multi-session-plugins into stable directory (macOS)' "$patcher" ||
+        fail "macOS plugin patch does not copy the built plugin into stable storage"
+    grep -Fq 'Record stable openclaw-multi-session-plugins install (macOS)' "$patcher" ||
+        fail "macOS plugin patch does not record stable OpenClaw provenance"
+    if grep -Fq 'Link openclaw-multi-session-plugins to extensions (macOS)' "$patcher"; then
+        fail "macOS plugin patch still installs the extension as a temporary symlink"
+    fi
+}
+
 test_root_does_not_require_sudo
 printf 'ok - root execution does not require sudo\n'
 test_non_root_uses_sudo
@@ -246,3 +279,7 @@ test_linux_non_root_uses_current_user_home
 printf 'ok - Linux non-root deployment uses passwd home\n'
 test_linux_identity_vars_can_be_overridden
 printf 'ok - Linux deployment identity can be overridden\n'
+test_provider_api_keys_use_secret_logging
+printf 'ok - provider API keys use masked secret logging\n'
+test_macos_plugin_patch_uses_stable_directory
+printf 'ok - macOS plugin patch uses stable extension storage\n'

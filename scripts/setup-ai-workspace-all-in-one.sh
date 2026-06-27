@@ -2017,12 +2017,12 @@ append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
 append_var "LITELLM_VERSION"                    "litellm_version"
 append_var "OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC" "gateway_openclaw_multi_session_plugin_package_spec"
 
-append_var "DEEPSEEK_API_KEY"                   "litellm_deepseek_api_key"
-append_var "NVIDIA_API_KEY"                     "litellm_nvidia_api_key"
-append_var "OLLAMA_API_KEY"                     "litellm_ollama_api_key"
-append_var "GEMINI_API_KEY"                     "litellm_gemini_api_key"
-append_var "OPENAI_API_KEY"                     "litellm_openai_api_key"
-append_var "ANTHROPIC_API_KEY"                  "litellm_anthropic_api_key"
+append_secret_var "litellm_deepseek_api_key" "${DEEPSEEK_API_KEY:-}"
+append_secret_var "litellm_nvidia_api_key" "${NVIDIA_API_KEY:-}"
+append_secret_var "litellm_ollama_api_key" "${OLLAMA_API_KEY:-}"
+append_secret_var "litellm_gemini_api_key" "${GEMINI_API_KEY:-}"
+append_secret_var "litellm_openai_api_key" "${OPENAI_API_KEY:-}"
+append_secret_var "litellm_anthropic_api_key" "${ANTHROPIC_API_KEY:-}"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
 UNIFIED_AUTH_TOKEN="$(resolve_unified_auth_token)"
