@@ -1085,11 +1085,16 @@ patch_playbooks_for_macos() {
     info "Fetching and running macOS playbook patches..."
     local patch_script="/tmp/patch-macos-playbooks.py"
     local raw_url="https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/patch-macos-playbooks.py"
-    
-    if command -v curl >/dev/null 2>&1; then
-        curl -sfL -o "$patch_script" "$raw_url"
+    local bootstrap_script_dir local_patch_script
+    bootstrap_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || true)"
+    local_patch_script="${bootstrap_script_dir}/patch-macos-playbooks.py"
+
+    if [ -f "$local_patch_script" ]; then
+        cp "$local_patch_script" "$patch_script"
+    elif command -v curl >/dev/null 2>&1; then
+        curl -sfL -o "$patch_script" "${raw_url}?rev=$(date +%s)"
     else
-        wget -qO "$patch_script" "$raw_url"
+        wget -qO "$patch_script" "${raw_url}?rev=$(date +%s)"
     fi
     
     if [ -f "$patch_script" ]; then

@@ -250,6 +250,13 @@ test_macos_plugin_patch_uses_stable_directory() {
     fi
 }
 
+test_local_bootstrap_prefers_local_macos_patcher() {
+    grep -Fq 'if [ -f "$local_patch_script" ]' "$BOOTSTRAP" ||
+        fail "local bootstrap does not prefer its checked-in macOS patcher"
+    grep -Fq '"${raw_url}?rev=$(date +%s)"' "$BOOTSTRAP" ||
+        fail "remote macOS patcher download is not cache-busted"
+}
+
 test_root_does_not_require_sudo
 printf 'ok - root execution does not require sudo\n'
 test_non_root_uses_sudo
@@ -283,3 +290,5 @@ test_provider_api_keys_use_secret_logging
 printf 'ok - provider API keys use masked secret logging\n'
 test_macos_plugin_patch_uses_stable_directory
 printf 'ok - macOS plugin patch uses stable extension storage\n'
+test_local_bootstrap_prefers_local_macos_patcher
+printf 'ok - local bootstrap prefers the checked-in macOS patcher\n'
