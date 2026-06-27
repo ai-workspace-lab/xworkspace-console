@@ -18,8 +18,8 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 #        VULTR_API_KEY              → Vultr 账号 API key（provision 创主机）
 #        SSH_PRIVATE_DEPLOY_KEY_B64 → 部署 SSH 私钥 base64（deploy 登录主机，优先）
 #        SSH_PRIVATE_DEPLOY_KEY     → 同上原始多行格式（回退，二选一必填）
-#        CLOUDFLARE_DNS_API_TOKEN   → CF Zone DNS Edit token（dns 同步，兼容旧名）
-#        CLOUDFLARE_API_TOKEN       → 同上，Cloudflare 角色兼容别名
+#        CLOUDFLARE_DNS_API_TOKEN   → CF Zone DNS Edit token（dns 同步）
+#        CLOUDFLARE_API_TOKEN       → 兼容旧名；DNS job 优先使用 CLOUDFLARE_DNS_API_TOKEN
 #      kv/openclaw:
 #        DEEPSEEK_API_KEY           → LLM provider key（deploy 注入主机）
 #        NVIDIA_API_KEY             → 同上
@@ -425,18 +425,16 @@ jobs:
           jwtGithubAudience: vault
           ignoreNotFound: true
           secrets: |
-            ${{ env.VAULT_KV }} CLOUDFLARE_DNS_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN ;
-            ${{ env.VAULT_KV }} CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
+            ${{ env.VAULT_KV }} CLOUDFLARE_DNS_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN
 
       - name: Validate required secrets
         env:
           CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_DNS_API_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           # 只校验 REQUIRED 机密非空（不打印任何值，仅判空）；INFRA_REPO_TOKEN 可选不校验。
           missing=0
-          if [ -z "${CLOUDFLARE_DNS_API_TOKEN:-}" ] && [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+          if [ -z "${CLOUDFLARE_DNS_API_TOKEN:-}" ]; then
             echo "::error::缺少必需机密 CLOUDFLARE_DNS_API_TOKEN (Vault: ${VAULT_KV}/CLOUDFLARE_DNS_API_TOKEN)"
             missing=1
           fi
@@ -466,7 +464,6 @@ jobs:
         working-directory: ${{ env.PLAYBOOKS_DIR }}
         env:
           CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_DNS_API_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           # 只为本次新建的 ai_workspace 组主机同步 A 记录（域名取各主机
