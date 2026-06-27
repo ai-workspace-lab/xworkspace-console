@@ -251,8 +251,22 @@ test_macos_plugin_patch_uses_stable_directory() {
 }
 
 test_local_bootstrap_prefers_local_macos_patcher() {
-    grep -Fq 'if [ -f "$local_patch_script" ]' "$BOOTSTRAP" ||
-        fail "local bootstrap does not prefer its checked-in macOS patcher"
+    local checkout workdir
+    checkout="$(mktemp -d)"
+    workdir="$(mktemp -d)"
+    mkdir -p "$checkout/scripts"
+    printf 'local-patcher-marker\n' > "$checkout/scripts/patch-macos-playbooks.py"
+    (
+        XWORKSPACE_CONSOLE_DIR="$checkout"
+        cd "$workdir"
+        # shellcheck disable=SC2329
+        python3() {
+            grep -q '^local-patcher-marker$' "$1" ||
+                fail "patch function did not execute the checked-in patcher"
+        }
+        patch_playbooks_for_macos
+    )
+    rm -rf "$checkout" "$workdir"
     grep -Fq '"${raw_url}?rev=$(date +%s)"' "$BOOTSTRAP" ||
         fail "remote macOS patcher download is not cache-busted"
 }

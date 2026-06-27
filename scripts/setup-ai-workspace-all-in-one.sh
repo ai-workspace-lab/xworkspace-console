@@ -1085,9 +1085,8 @@ patch_playbooks_for_macos() {
     info "Fetching and running macOS playbook patches..."
     local patch_script="/tmp/patch-macos-playbooks.py"
     local raw_url="https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/main/scripts/patch-macos-playbooks.py"
-    local bootstrap_script_dir local_patch_script
-    bootstrap_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || true)"
-    local_patch_script="${bootstrap_script_dir}/patch-macos-playbooks.py"
+    local local_patch_script
+    local_patch_script="${XWORKSPACE_CONSOLE_DIR}/scripts/patch-macos-playbooks.py"
 
     if [ -f "$local_patch_script" ]; then
         cp "$local_patch_script" "$patch_script"
