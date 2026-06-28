@@ -46,10 +46,7 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 #   7. AI_WORKSPACE_AUTH_TOKEN（LiteLLM 认证 token，存储在 Vault）
 #      - 用于 OpenCode ACP adapter 的 LITELLM_MASTER_KEY
 #      - 存储位置：vault kv patch kv/CICD AI_WORKSPACE_AUTH_TOKEN=<your-token>
-#      - TLDR 生成非常简单：
-#        • Python:   python3 -c 'import uuid; print(uuid.uuid4())'
-#        • macOS:    openssl rand -hex 32
-#        • Linux:    openssl rand -base64 32
+#      - TLDR 生成：python3 -c 'import uuid; print(uuid.uuid4())'
 #      - 部署时自动从 Vault 读取，注入 ansible role 的 acp_opencode_auth_token
 #
 # ── 流水线结构 ───────────────────────────────────────────────────────────────
@@ -124,7 +121,7 @@ on:
         default: true
         type: boolean
       ai_workspace_auth_token:
-        description: "自定义覆盖 AI Workspace auth token（留空则使用 Vault kv/CICD/AI_WORKSPACE_AUTH_TOKEN）— TLDR 生成：python3 -c 'import uuid; print(uuid.uuid4())' 或 openssl rand -hex 32"
+        description: "AI Workspace auth token 覆盖(留空则取 Vault kv/CICD/AI_WORKSPACE_AUTH_TOKEN；生成: python3 -c 'import uuid; print(uuid.uuid4())')"
         required: false
         default: ""
         type: string
