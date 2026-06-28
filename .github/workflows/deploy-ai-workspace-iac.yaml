@@ -43,11 +43,14 @@ name: Deploy AI Workspace (IaC + Ansible + Cloudflare)
 #        ai-workspace-infra/vultr-vps/config/resources/ai-workspace-hosts.yaml
 #        的 ssh_keys[].public，否则 Terraform 创机后 runner 无法 SSH 登录。
 #
-#   7. AI_WORKSPACE_AUTH_TOKEN（LiteLLM 认证 token，存储在 Vault）
-#      - 用于 OpenCode ACP adapter 的 LITELLM_MASTER_KEY
+#   7. AI_WORKSPACE_AUTH_TOKEN（统一服务 token：LiteLLM master key / bridge / vault 等）
+#      - 三级优先级（on-host installer resolve_unified_auth_token 统一解析）：
+#        1) workflow_dispatch 输入 ai_workspace_auth_token（非空时覆盖）
+#        2) Vault kv/CICD/AI_WORKSPACE_AUTH_TOKEN（输入留空时回退）
+#        3) 两者皆空：installer 复用 ~/.ai_workspace_auth_token 或自动生成并持久化
 #      - 存储位置：vault kv patch kv/CICD AI_WORKSPACE_AUTH_TOKEN=<your-token>
 #      - TLDR 生成：python3 -c 'import uuid; print(uuid.uuid4())'
-#      - 部署时自动从 Vault 读取，注入 ansible role 的 acp_opencode_auth_token
+#      - 经 run-on-host-bootstrap.sh 透传到主机 env，注入 all-in-one 各 role
 #
 # ── 流水线结构 ───────────────────────────────────────────────────────────────
 #
@@ -327,7 +330,8 @@ jobs:
             ${{ env.VAULT_KV }} SSH_PRIVATE_DEPLOY_KEY_B64 | ANSIBLE_SSH_KEY_B64 ;
             ${{ env.VAULT_KV_OPENCLAW }} DEEPSEEK_API_KEY | DEEPSEEK_API_KEY ;
             ${{ env.VAULT_KV_OPENCLAW }} NVIDIA_API_KEY | NVIDIA_API_KEY ;
-            ${{ env.VAULT_KV_OPENCLAW }} OLLAMA_API_KEY | OLLAMA_API_KEY
+            ${{ env.VAULT_KV_OPENCLAW }} OLLAMA_API_KEY | OLLAMA_API_KEY ;
+            ${{ env.VAULT_KV }} AI_WORKSPACE_AUTH_TOKEN | AI_WORKSPACE_AUTH_TOKEN
 
       - name: Report provider key wiring
         run: |
@@ -414,7 +418,9 @@ jobs:
           # 离线包重新发布后可设为 auto 恢复离线加速。
           AI_WORKSPACE_OFFLINE_MODE: ${{ github.event.inputs.offline_mode || 'off' }}
           XWORKMATE_BRIDGE_DOMAIN: ${{ github.event.inputs.bridge_domain }}
-          AI_WORKSPACE_AUTH_TOKEN: ${{ github.event.inputs.ai_workspace_auth_token }}
+          # input 非空则覆盖；否则取 Vault kv/CICD/AI_WORKSPACE_AUTH_TOKEN；
+          # 两者皆空时由 on-host installer (resolve_unified_auth_token) 自动生成并持久化。
+          AI_WORKSPACE_AUTH_TOKEN: ${{ github.event.inputs.ai_workspace_auth_token != '' && github.event.inputs.ai_workspace_auth_token || steps.vault.outputs.AI_WORKSPACE_AUTH_TOKEN }}
           DEEPSEEK_API_KEY: ${{ github.event.inputs.use_deepseek == 'false' && '' || steps.vault.outputs.DEEPSEEK_API_KEY }}
           NVIDIA_API_KEY: ${{ github.event.inputs.use_nvidia == 'false' && '' || steps.vault.outputs.NVIDIA_API_KEY }}
           OLLAMA_API_KEY: ${{ github.event.inputs.use_ollama == 'false' && '' || steps.vault.outputs.OLLAMA_API_KEY }}

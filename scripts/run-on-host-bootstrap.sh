@@ -46,6 +46,8 @@ trap 'rm -f "$remote_payload"' EXIT
 {
   printf 'AI_WORKSPACE_OFFLINE_MODE=%q\n' "${AI_WORKSPACE_OFFLINE_MODE:-off}"
   printf 'XWORKMATE_BRIDGE_DOMAIN=%q\n' "$domain"
+  # 空则不写，让 on-host installer 的 resolve_unified_auth_token 走"复用持久化/自动生成"分支。
+  printf 'AI_WORKSPACE_AUTH_TOKEN=%q\n' "${AI_WORKSPACE_AUTH_TOKEN:-}"
   printf 'DEEPSEEK_API_KEY=%q\n' "${DEEPSEEK_API_KEY:-}"
   printf 'NVIDIA_API_KEY=%q\n' "${NVIDIA_API_KEY:-}"
   printf 'OLLAMA_API_KEY=%q\n' "${OLLAMA_API_KEY:-}"
@@ -67,7 +69,7 @@ fi
 (
   set +e
   source "$remote_env"
-  export AI_WORKSPACE_OFFLINE_MODE XWORKMATE_BRIDGE_DOMAIN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY
+  export AI_WORKSPACE_OFFLINE_MODE XWORKMATE_BRIDGE_DOMAIN AI_WORKSPACE_AUTH_TOKEN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY
   bash -lc 'curl -sfL https://install.svc.plus/ai-workspace | bash -'
   rc=$?
   printf '%s\n' "$rc" > "$remote_rc"
