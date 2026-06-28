@@ -176,8 +176,7 @@ jobs:
             ${{ env.VAULT_KV }} TF_STATE_SECRET_KEY | TF_STATE_SECRET_KEY ;
             ${{ env.VAULT_KV }} TF_STATE_REGION | TF_STATE_REGION ;
             ${{ env.VAULT_KV }} CLOUDFLARE_DNS_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN ;
-            ${{ env.VAULT_KV }} CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
-            ${{ env.VAULT_KV }} AI_WORKSPACE_AUTH_TOKEN | AI_WORKSPACE_AUTH_TOKEN
+            ${{ env.VAULT_KV }} CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
 
       - name: Validate required secrets
         env:
@@ -329,7 +328,6 @@ jobs:
           secrets: |
             ${{ env.VAULT_KV }} SSH_PRIVATE_DEPLOY_KEY | ANSIBLE_SSH_KEY ;
             ${{ env.VAULT_KV }} SSH_PRIVATE_DEPLOY_KEY_B64 | ANSIBLE_SSH_KEY_B64 ;
-            ${{ env.VAULT_KV }} AI_WORKSPACE_AUTH_TOKEN | AI_WORKSPACE_AUTH_TOKEN ;
             ${{ env.VAULT_KV_OPENCLAW }} DEEPSEEK_API_KEY | DEEPSEEK_API_KEY ;
             ${{ env.VAULT_KV_OPENCLAW }} NVIDIA_API_KEY | NVIDIA_API_KEY ;
             ${{ env.VAULT_KV_OPENCLAW }} OLLAMA_API_KEY | OLLAMA_API_KEY
@@ -345,7 +343,6 @@ jobs:
         env:
           ANSIBLE_SSH_KEY: ${{ steps.vault.outputs.ANSIBLE_SSH_KEY }}
           ANSIBLE_SSH_KEY_B64: ${{ steps.vault.outputs.ANSIBLE_SSH_KEY_B64 }}
-          AI_WORKSPACE_AUTH_TOKEN: ${{ steps.vault.outputs.AI_WORKSPACE_AUTH_TOKEN }}
           DEEPSEEK_API_KEY: ${{ github.event.inputs.use_deepseek == 'false' && '' || steps.vault.outputs.DEEPSEEK_API_KEY }}
           NVIDIA_API_KEY: ${{ github.event.inputs.use_nvidia == 'false' && '' || steps.vault.outputs.NVIDIA_API_KEY }}
           OLLAMA_API_KEY: ${{ github.event.inputs.use_ollama == 'false' && '' || steps.vault.outputs.OLLAMA_API_KEY }}
@@ -357,10 +354,6 @@ jobs:
           if [ -z "${ANSIBLE_SSH_KEY_B64:-}" ] && [ -z "${ANSIBLE_SSH_KEY:-}" ]; then
             echo "::error::缺少必需机密 SSH 私钥 (Vault: ${VAULT_KV}/SSH_PRIVATE_DEPLOY_KEY_B64 或 ${VAULT_KV}/SSH_PRIVATE_DEPLOY_KEY，至少一个)"
             missing=1
-          fi
-          # AI_WORKSPACE_AUTH_TOKEN 可选，存在即校验非空。
-          if [ -n "${AI_WORKSPACE_AUTH_TOKEN:-}" ]; then
-            echo "AI_WORKSPACE_AUTH_TOKEN: present (will inject as acp_opencode_auth_token)"
           fi
           if [ "${{ github.event.inputs.use_deepseek || 'true' }}" = "true" ] && [ -z "${DEEPSEEK_API_KEY:-}" ]; then
             echo "::error::缺少必需机密 DEEPSEEK_API_KEY (Vault: ${VAULT_KV_OPENCLAW}/DEEPSEEK_API_KEY)"
@@ -424,8 +417,7 @@ jobs:
           # 离线包重新发布后可设为 auto 恢复离线加速。
           AI_WORKSPACE_OFFLINE_MODE: ${{ github.event.inputs.offline_mode || 'off' }}
           XWORKMATE_BRIDGE_DOMAIN: ${{ github.event.inputs.bridge_domain }}
-          # AI_WORKSPACE_AUTH_TOKEN: 优先使用 input 自定义值；留空则回退到 Vault 的值
-          AI_WORKSPACE_AUTH_TOKEN: ${{ github.event.inputs.ai_workspace_auth_token || steps.vault.outputs.AI_WORKSPACE_AUTH_TOKEN }}
+          AI_WORKSPACE_AUTH_TOKEN: ${{ github.event.inputs.ai_workspace_auth_token }}
           DEEPSEEK_API_KEY: ${{ github.event.inputs.use_deepseek == 'false' && '' || steps.vault.outputs.DEEPSEEK_API_KEY }}
           NVIDIA_API_KEY: ${{ github.event.inputs.use_nvidia == 'false' && '' || steps.vault.outputs.NVIDIA_API_KEY }}
           OLLAMA_API_KEY: ${{ github.event.inputs.use_ollama == 'false' && '' || steps.vault.outputs.OLLAMA_API_KEY }}
