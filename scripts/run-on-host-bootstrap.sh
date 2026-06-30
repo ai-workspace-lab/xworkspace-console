@@ -11,7 +11,7 @@ ip="$(jq -r --arg host "$host" '.[$host].ip' "$cmdb_path")"
 user="$(jq -r --arg host "$host" '.[$host].ansible_user // "root"' "$cmdb_path")"
 domain="${XWORKMATE_BRIDGE_DOMAIN:-}"
 if [ -z "$domain" ]; then
-  domain="$(jq -r --arg host "$host" '.[$host].host_vars.service_domains // ""' "$cmdb_path" | cut -d, -f1 | tr -d ' ')"
+  domain="$(jq -r --arg host "$host" '(.[$host].host_vars.service_domains // "") | if type == "array" then .[0] else split(",")[0] end' "$cmdb_path" | tr -d ' ')"
 fi
 
 if [ -z "$ip" ] || [ "$ip" = "null" ]; then
