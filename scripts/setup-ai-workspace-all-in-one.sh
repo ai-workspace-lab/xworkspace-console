@@ -1104,6 +1104,121 @@ patch_playbooks_for_macos() {
     fi
 }
 
+patch_playbooks_for_linux() {
+    if [ "$(detect_os)" != "linux" ]; then
+        return
+    fi
+
+    info "Applying Linux playbook compatibility patches..."
+    python3 - <<'PY'
+from pathlib import Path
+
+root = Path.cwd()
+replacements = [
+    (
+        "roles/vhosts/xworkmate_bridge/defaults/main.yml",
+        """# Caddy configuration paths
+xworkmate_bridge_caddy_base_dir: "{{ caddy_config_dir }}"
+xworkmate_bridge_caddyfile_path: "{{ caddy_config_dir }}/Caddyfile"
+xworkmate_bridge_caddy_conf_dir: "{{ caddy_config_dir }}/conf.d"
+xworkmate_bridge_service_caddy_fragment_path: "{{ caddy_config_dir }}/conf.d/xworkmate-bridge.caddy"
+""",
+        """# Caddy configuration paths. Fall back to /etc/caddy when the global group_vars
+# file is not loaded by the caller (for example, ad-hoc bootstrap executors).
+_xworkmate_bridge_caddy_root: "{{ caddy_config_dir | default('/etc/caddy', true) }}"
+xworkmate_bridge_caddy_base_dir: "{{ _xworkmate_bridge_caddy_root }}"
+xworkmate_bridge_caddyfile_path: "{{ _xworkmate_bridge_caddy_root }}/Caddyfile"
+xworkmate_bridge_caddy_conf_dir: "{{ _xworkmate_bridge_caddy_root }}/conf.d"
+xworkmate_bridge_service_caddy_fragment_path: "{{ _xworkmate_bridge_caddy_root }}/conf.d/xworkmate-bridge.caddy"
+""",
+    ),
+    (
+        "roles/vhosts/gateway_openclaw/defaults/main.yml",
+        """gateway_openclaw_caddyfile_path: "{{ caddy_config_dir }}/Caddyfile"
+gateway_openclaw_caddy_conf_dir: "{{ caddy_config_dir }}/conf.d"
+gateway_openclaw_caddy_fragment_path: "{{ caddy_config_dir }}/conf.d/{{ gateway_openclaw_domain }}.caddy"
+""",
+        """gateway_openclaw_caddy_root: "{{ caddy_config_dir | default('/etc/caddy', true) }}"
+gateway_openclaw_caddyfile_path: "{{ gateway_openclaw_caddy_root }}/Caddyfile"
+gateway_openclaw_caddy_conf_dir: "{{ gateway_openclaw_caddy_root }}/conf.d"
+gateway_openclaw_caddy_fragment_path: "{{ gateway_openclaw_caddy_root }}/conf.d/{{ gateway_openclaw_domain }}.caddy"
+""",
+    ),
+    (
+        "roles/vhosts/litellm/defaults/main.yml",
+        """litellm_caddyfile_path: "{{ caddy_config_dir }}/Caddyfile"
+litellm_caddy_conf_dir: "{{ caddy_config_dir }}/conf.d"
+
+litellm_basic_auth_username: "{{ litellm_ui_username }}"
+""",
+        """litellm_caddy_root: "{{ caddy_config_dir | default('/etc/caddy', true) }}"
+litellm_caddyfile_path: "{{ litellm_caddy_root }}/Caddyfile"
+litellm_caddy_conf_dir: "{{ litellm_caddy_root }}/conf.d"
+
+litellm_basic_auth_username: "{{ litellm_ui_username }}"
+""",
+    ),
+    (
+        "roles/vhosts/litellm/defaults/main.yml",
+        """litellm_api_domain: api.svc.plus
+litellm_ui_domain: litellm.svc.plus
+litellm_ui_path: /ui
+litellm_api_caddy_fragment_path: "{{ caddy_config_dir }}/conf.d/{{ litellm_api_domain }}.caddy"
+litellm_ui_caddy_fragment_path: "{{ caddy_config_dir }}/conf.d/{{ litellm_ui_domain }}.caddy"
+""",
+        """litellm_api_domain: api.svc.plus
+litellm_ui_domain: litellm.svc.plus
+litellm_ui_path: /ui
+litellm_api_caddy_fragment_path: "{{ litellm_caddy_root }}/conf.d/{{ litellm_api_domain }}.caddy"
+litellm_ui_caddy_fragment_path: "{{ litellm_caddy_root }}/conf.d/{{ litellm_ui_domain }}.caddy"
+""",
+    ),
+    (
+        "roles/vhosts/caddy/tasks/main.yml",
+        """    - name: Ensure Caddy config directory exists
+      ansible.builtin.file:
+        path: "{{ caddy_config_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Deploy Caddyfile
+      ansible.builtin.template:
+        src: Caddyfile.j2
+        dest: "{{ caddy_config_dir }}/Caddyfile"
+        mode: '0644'
+""",
+        """    - name: Ensure Caddy config directory exists
+      ansible.builtin.file:
+        path: "{{ caddy_config_dir | default('/etc/caddy', true) }}"
+        state: directory
+        mode: '0755'
+
+    - name: Deploy Caddyfile
+      ansible.builtin.template:
+        src: Caddyfile.j2
+        dest: "{{ caddy_config_dir | default('/etc/caddy', true) }}/Caddyfile"
+        mode: '0644'
+""",
+    ),
+    (
+        "roles/vhosts/caddy/templates/Caddyfile.j2",
+        """import {{ caddy_config_dir }}/conf.d/*.caddy
+""",
+        """import {{ caddy_config_dir | default('/etc/caddy', true) }}/conf.d/*.caddy
+""",
+    ),
+]
+
+for rel, old, new in replacements:
+    path = root / rel
+    if not path.exists():
+        continue
+    text = path.read_text()
+    if old in text:
+        path.write_text(text.replace(old, new))
+PY
+}
+
 ensure_core_skills_source() {
     if [ "${AI_WORKSPACE_PREFETCH_COMPLETED:-false}" = "true" ] &&
        [ -d "$XWORKSPACE_CORE_SKILLS_DIR/skills" ]; then
@@ -1969,6 +2084,8 @@ fi
 
 if [ "$(detect_os)" = "darwin" ]; then
     patch_playbooks_for_macos
+elif [ "$(detect_os)" = "linux" ]; then
+    patch_playbooks_for_linux
 fi
 prefetch_independent_sources
 ensure_core_skills_source
