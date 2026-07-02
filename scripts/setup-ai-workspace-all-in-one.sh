@@ -929,7 +929,12 @@ try_bootstrap_from_offline_package() {
 
 linux_default_console_user() {
     if [ -n "${XWORKSPACE_CONSOLE_USER:-}" ]; then
-        printf '%s\n' "$XWORKSPACE_CONSOLE_USER"
+        if [ "$XWORKSPACE_CONSOLE_USER" = "root" ]; then
+            warn "XWORKSPACE_CONSOLE_USER=root is not supported; using the dedicated ubuntu runtime user."
+            printf 'ubuntu\n'
+        else
+            printf '%s\n' "$XWORKSPACE_CONSOLE_USER"
+        fi
     elif [ "$(id -u)" -eq 0 ]; then
         printf 'ubuntu\n'
     else
@@ -940,11 +945,16 @@ linux_default_console_user() {
 linux_default_console_home() {
     local user=$1
     if [ -n "${XWORKSPACE_CONSOLE_HOME:-}" ]; then
-        printf '%s\n' "$XWORKSPACE_CONSOLE_HOME"
+        if [ "$XWORKSPACE_CONSOLE_HOME" = "/root" ] || [[ "$XWORKSPACE_CONSOLE_HOME" = /root/* ]]; then
+            warn "XWORKSPACE_CONSOLE_HOME under /root is not supported; using /home/$user."
+            printf '/home/%s\n' "$user"
+        else
+            printf '%s\n' "$XWORKSPACE_CONSOLE_HOME"
+        fi
     elif command -v getent >/dev/null 2>&1 && getent passwd "$user" >/dev/null 2>&1; then
         getent passwd "$user" | cut -d: -f6
     elif [ "$user" = "root" ]; then
-        printf '/root\n'
+        printf '/home/ubuntu\n'
     else
         printf '/home/%s\n' "$user"
     fi
@@ -960,6 +970,38 @@ append_linux_console_identity_vars() {
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_config_dir=$console_home/.config/xworkspace")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_scripts_dir=$console_home/.local/state/ai-workspace/scripts")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$console_home/xworkspace-console")
+
+    # All Linux services share the dedicated runtime identity.  Ansible is
+    # commonly invoked over SSH as root, so role defaults based on
+    # ansible_env.USER/HOME would otherwise persist service state in /root.
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_service_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_service_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_service_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_codex_runtime_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_codex_runtime_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_codex_runtime_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_opencode_service_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_opencode_service_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_opencode_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_opencode_workdir=$console_home/.opencode")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_gemini_service_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_gemini_service_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_gemini_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_hermes_service_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_hermes_service_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "acp_hermes_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "qmd_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "qmd_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "qmd_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "litellm_service_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "litellm_service_group=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "litellm_service_home=$console_home")
 }
 
 resolve_unified_auth_token() {

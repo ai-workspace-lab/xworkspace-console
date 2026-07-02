@@ -215,6 +215,24 @@ test_linux_identity_vars_can_be_overridden() (
     printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkspace_console_user=deploy$' || fail "console user extra var missing"
     printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkspace_console_home=/srv/deploy$' || fail "console home extra var missing"
     printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkspace_console_repo_dir=/srv/deploy/xworkspace-console$' || fail "console repo extra var missing"
+    printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^gateway_openclaw_home=/srv/deploy$' || fail "OpenClaw home extra var missing"
+    printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkmate_bridge_service_home=/srv/deploy$' || fail "bridge home extra var missing"
+    printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^litellm_service_home=/srv/deploy$' || fail "LiteLLM home extra var missing"
+)
+
+test_linux_root_identity_override_is_rejected() (
+    export XWORKSPACE_CONSOLE_USER=root
+    export XWORKSPACE_CONSOLE_HOME=/root
+    user="$(linux_default_console_user)"
+    home="$(linux_default_console_home "$user")"
+    [ "$user" = "ubuntu" ] || fail "explicit root runtime user was accepted"
+    [ "$home" = "/home/ubuntu" ] || fail "runtime home under /root was accepted"
+
+    ANSIBLE_EXTRA_VARS=()
+    append_linux_console_identity_vars "$user" "$home"
+    if printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '=/root\(/\|$\)'; then
+        fail "service identity vars contain a /root path"
+    fi
 )
 
 test_provider_api_keys_use_secret_logging() {
@@ -300,6 +318,8 @@ test_linux_non_root_uses_current_user_home
 printf 'ok - Linux non-root deployment uses passwd home\n'
 test_linux_identity_vars_can_be_overridden
 printf 'ok - Linux deployment identity can be overridden\n'
+test_linux_root_identity_override_is_rejected
+printf 'ok - Linux root service identity overrides are rejected\n'
 test_provider_api_keys_use_secret_logging
 printf 'ok - provider API keys use masked secret logging\n'
 test_macos_plugin_patch_uses_stable_directory
