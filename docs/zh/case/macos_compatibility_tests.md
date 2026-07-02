@@ -233,9 +233,9 @@ curl -sfL https://install.svc.plus/ai-workspace | bash -
 |------|------|
 | **触发文件** | `roles/vhosts/gateway_openclaw/tasks/main.yml` |
 | **触发报错** | `Assert OpenClaw Codex plugin matches gateway version` 失败，提示必须运行 `@openclaw/codex 2026.6.1` 与 `openclaw-multi-session-plugins 2026.6.1`，并且不得保留 stale global `@openclaw/acpx` |
-| **根因** | assert 将 `acpx` 一律视为 stale，但当前 OpenClaw 插件注册表可能包含版本匹配的 `acpx`，应检查版本而非只检查存在性 |
-| **修复方案** | 调整 assert：允许 version-matched `acpx`，仅拒绝 stale/global 不匹配版本 |
-| **验证状态** | 已提交 `c11f51b`。仍需在全量部署中观察插件注册表刷新后 assert 结果 |
+| **根因** | OpenClaw 主程序升级到 `2026.6.1` 后，受 OpenClaw 管理的 `@openclaw/acpx` 仍停留在 `2026.5.28`；role 只在末尾检查版本，没有在版本漂移时主动升级插件 |
+| **修复方案** | 在刷新插件注册表前探测 ACPX；缺失时精确安装 `@openclaw/acpx@2026.6.1`，旧版本则通过 `openclaw plugins update acpx` 升级到与网关兼容的 `2026.6.1`，之后再执行版本 assert |
+| **验证状态** | 已在 Linux 目标主机将 ACPX 从 `2026.5.28` 升级到 `2026.6.1` 并重新执行全量部署；macOS 仍需在完整安装中验证同一路径 |
 
 ## TC-MAC-023: LiteLLM Python 3.13/3.14 混用
 

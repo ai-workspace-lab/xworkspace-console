@@ -233,9 +233,9 @@ Still need to use a clean install to verify if the remote script pointed to by `
 |------|------|
 | **Trigger File** | `roles/vhosts/gateway_openclaw/tasks/main.yml` |
 | **Trigger Error** | `Assert OpenClaw Codex plugin matches gateway version` fails, prompting that it must run `@openclaw/codex 2026.6.1` and `openclaw-multi-session-plugins 2026.6.1`, and must not retain stale global `@openclaw/acpx` |
-| **Root Cause** | The assert treats all `acpx` as stale, but the current OpenClaw plugin registry might contain version-matched `acpx`. It should check the version instead of just existence |
-| **Fix Solution** | Adjust assert: allow version-matched `acpx`, only reject stale/global mismatched versions |
-| **Verification Status** | Committed `c11f51b`. Still need to observe assert results after plugin registry refresh in a full deployment |
+| **Root Cause** | After OpenClaw was upgraded to `2026.6.1`, the OpenClaw-managed `@openclaw/acpx` remained at `2026.5.28`. The role only checked the version at the end and did not repair plugin version drift |
+| **Fix Solution** | Inspect ACPX before refreshing the registry; install the exact `@openclaw/acpx@2026.6.1` package when missing, or run `openclaw plugins update acpx` when stale, then enforce the version assertion |
+| **Verification Status** | ACPX was upgraded from `2026.5.28` to `2026.6.1` on the Linux target and a full deployment was rerun; the same path still needs verification during a complete macOS installation |
 
 ## TC-MAC-023: LiteLLM Python 3.13/3.14 Mixed Use
 
