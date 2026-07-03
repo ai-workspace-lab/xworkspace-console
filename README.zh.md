@@ -18,6 +18,7 @@ XWorkspace Console 是 AI Workspace Lab 的本地 AI 工作区控制平面。它
 - 以标签页优先的控制台，涵盖工作区、服务、运行时和嵌入式工具
 - 旨在协调本地 AI 服务、网关访问和桌面引导流程
 - 后端由 `dashboard/`、`api/`、`config/`、`scripts/` 和 `docs/` 支持
+- all-in-one 安装器现默认部署 [X-Memory-Hub](https://github.com/ai-workspace-lab/X-Memory-Hub)（开发版本，跟踪 `main`）——PostgreSQL-first、MCP 兼容的记忆中枢，服务于 `http://127.0.0.1:8790`，复用套件的 PostgreSQL（pgvector + pg_jieba）与 LiteLLM 网关 embedding
 
 ## 快速开始 (Start TLDR)
 

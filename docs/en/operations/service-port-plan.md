@@ -16,6 +16,7 @@ This plan is based on the live host inspection of `ubuntu@xworkmate-bridge.svc.p
 | XWorkmate Bridge | `127.0.0.1` | `8787` | `http://127.0.0.1:8787` | `xworkspace-bridge.service` / live `xworkmate-bridge.service` | Keep reserved for bridge control plane. Do not reuse for dashboard. |
 | OpenClaw Gateway | `127.0.0.1` | `18789` | `http://127.0.0.1:18789/channels` | `xworkspace-openclaw.service` / live `openclaw-gateway.service` | OpenClaw UI and gateway entry. |
 | LiteLLM | `127.0.0.1` | `4000` | `http://127.0.0.1:4000/ui` | `xworkspace-litellm.service` | Live host returns HTTP 200 after redirect. |
+| X Memory Hub | `127.0.0.1` | `8790` | `http://127.0.0.1:8790/healthz` | `x-memory-hub.service` / macOS `plus.svc.xworkspace.x-memory-hub` | Development version (tracks `main`); REST + MCP on one port. |
 | Vault | `0.0.0.0` or `127.0.0.1` | `8200` | `http://127.0.0.1:8200` | `xworkspace-vault.service` / system Vault | Live host exposes Vault on `0.0.0.0:8200`; tighten to loopback later if no remote clients need it. |
 | Embedded Terminal | `127.0.0.1` | `7681` | `http://127.0.0.1:7681` | `ttyd.service` or `xworkspace-ttyd.service` | Use only one owner. Live host already has system `ttyd.service`; user `xworkspace-ttyd.service` fails due port conflict. |
 | Legacy Portal | `0.0.0.0` | `7000` | `http://127.0.0.1:7000` | `xworkspace-portal.service` | Deprecated. Replace with Console on `17000`. |

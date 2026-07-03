@@ -15,6 +15,7 @@ XWorkspace Console is the local AI workspace control plane for AI Workspace Lab.
 - Tab-first console for Workspace, services, runtime, and embedded tools
 - Designed to coordinate local AI services, gateway access, and desktop bootstrap flows
 - Backed by `dashboard/`, `api/`, `config/`, `scripts/`, and `docs/`
+- The all-in-one installer now also deploys [X-Memory-Hub](https://github.com/ai-workspace-lab/X-Memory-Hub) (development version, tracks `main`) by default — a PostgreSQL-first, MCP-compatible memory hub at `http://127.0.0.1:8790`, reusing the suite's PostgreSQL (pgvector + pg_jieba) and LiteLLM gateway for embeddings
 
 ## Start TLDR
 

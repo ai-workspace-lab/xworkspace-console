@@ -1354,14 +1354,19 @@ prefetch_independent_sources() {
     local console_dir="$AI_WORKSPACE_PREFETCH_DIR/xworkspace-console"
     local qmd_dir="$AI_WORKSPACE_PREFETCH_DIR/qmd"
     local litellm_dir="$AI_WORKSPACE_PREFETCH_DIR/litellm"
+    local x_memory_hub_dir="$AI_WORKSPACE_PREFETCH_DIR/x-memory-hub"
     local qmd_repo qmd_ref litellm_repo litellm_ref postgres_image
+    local x_memory_hub_repo x_memory_hub_ref
     qmd_repo="${QMD_SOURCE_REPO:-$(read_playbook_default roles/vhosts/qmd/defaults/main.yml qmd_source_repo)}"
     qmd_ref="${QMD_VERSION:-$(read_playbook_default roles/vhosts/qmd/defaults/main.yml qmd_version)}"
     litellm_repo="${LITELLM_SOURCE_REPO:-$(read_playbook_default roles/vhosts/litellm/defaults/main.yml litellm_source_repo)}"
     litellm_ref="${LITELLM_VERSION:-$(read_playbook_default roles/vhosts/litellm/defaults/main.yml litellm_version)}"
+    x_memory_hub_repo="${X_MEMORY_HUB_SOURCE_REPO:-$(read_playbook_default roles/vhosts/x_memory_hub/defaults/main.yml x_memory_hub_source_repo)}"
+    x_memory_hub_ref="${X_MEMORY_HUB_VERSION:-$(read_playbook_default roles/vhosts/x_memory_hub/defaults/main.yml x_memory_hub_version)}"
     postgres_image="${POSTGRESQL_IMAGE:-$(read_playbook_default roles/vhosts/postgres/defaults/main.yml postgresql_image)}"
     [ -n "$qmd_repo" ] && [ -n "$qmd_ref" ] || error "Unable to resolve pinned QMD source."
     [ -n "$litellm_repo" ] && [ -n "$litellm_ref" ] || error "Unable to resolve pinned LiteLLM source."
+    [ -n "$x_memory_hub_repo" ] && [ -n "$x_memory_hub_ref" ] || error "Unable to resolve pinned X Memory Hub source."
 
     info "Starting load-adaptive Phase 2 source prefetch (current limit $(dynamic_parallel_job_limit), hard limit $(( $(online_cpu_count) * 2 )))..."
     reset_bounded_jobs
@@ -1375,6 +1380,8 @@ prefetch_independent_sources() {
         "qmd" "$qmd_repo" "$qmd_ref" "$qmd_dir"
     run_bounded "repo:litellm" prefetch_git_repository \
         "litellm" "$litellm_repo" "$litellm_ref" "$litellm_dir"
+    run_bounded "repo:x-memory-hub" prefetch_git_repository \
+        "x-memory-hub" "$x_memory_hub_repo" "$x_memory_hub_ref" "$x_memory_hub_dir"
 
     if command -v docker >/dev/null 2>&1 &&
        printf ',%s,' "${AI_WORKSPACE_RUNTIME_MODES:-docker,systemd}" | grep -q ',docker,'; then
@@ -1393,6 +1400,10 @@ prefetch_independent_sources() {
     export QMD_VERSION="$qmd_ref"
     export LITELLM_SOURCE_REPO="file://$litellm_dir"
     export LITELLM_VERSION="$litellm_ref"
+    export X_MEMORY_HUB_SOURCE_REPO="file://$x_memory_hub_dir"
+    # X Memory Hub 开发版本跟踪 main；prefetch 后固定到当次抓取的提交。
+    export X_MEMORY_HUB_VERSION
+    X_MEMORY_HUB_VERSION="$(cat "$x_memory_hub_dir/.ai-workspace-prefetched-commit")"
     export AI_WORKSPACE_PREFETCH_COMPLETED=true
     success "Phase 2 source prefetch completed."
 }
@@ -1632,6 +1643,7 @@ print_parallel_service_statuses() {
         "PostgreSQL"
         "Vault"
         "LiteLLM"
+        "X Memory Hub"
     )
     local units=(
         "xworkspace-console.service"
@@ -1643,8 +1655,9 @@ print_parallel_service_statuses() {
         "postgresql.service postgresql@17-main.service postgresql@16-main.service postgresql@15-main.service xworkspace-postgres.service"
         "xworkspace-vault.service vault.service"
         "xworkspace-litellm.service litellm-proxy.service litellm.service"
+        "x-memory-hub.service"
     )
-    local ports=("17000" "8788" "8787" "18789" "8181" "3920" "5432" "8200" "${AI_WORKSPACE_LITELLM_PORT}")
+    local ports=("17000" "8788" "8787" "18789" "8181" "3920" "5432" "8200" "${AI_WORKSPACE_LITELLM_PORT}" "8790")
     local urls=(
         "http://127.0.0.1:17000/"
         "http://127.0.0.1:8788/portal/services"
@@ -1655,6 +1668,7 @@ print_parallel_service_statuses() {
         ""
         "http://127.0.0.1:8200/v1/sys/health"
         "http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}/health"
+        "http://127.0.0.1:8790/healthz"
     )
 
     if command -v systemctl >/dev/null 2>&1; then
@@ -1716,6 +1730,7 @@ print_deployment_summary() {
   Workspace Portal (Console) : ${portal_url}      (本地)
   XWorkMate Bridge           : ${bridge_url}   ← ${bridge_label}
   LiteLLM API Endpoint       : http://127.0.0.1:${AI_WORKSPACE_LITELLM_PORT}      (本地)
+  X Memory Hub API           : http://127.0.0.1:8790      (本地, 开发版本)
 
 ${cred_label}
   AI_WORKSPACE_AUTH_TOKEN    : ${token}
@@ -2168,6 +2183,8 @@ append_var "XWORKSPACE_CONSOLE_SOURCE_VERSION"  "xworkspace_console_source_versi
 append_var "XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE" "xworkspace_console_runtime_archive"
 append_var "QMD_SOURCE_REPO"                    "qmd_source_repo"
 append_var "QMD_VERSION"                        "qmd_version"
+append_var "X_MEMORY_HUB_SOURCE_REPO"           "x_memory_hub_source_repo"
+append_var "X_MEMORY_HUB_VERSION"               "x_memory_hub_version"
 append_var "QMD_RUNTIME_ARCHIVE"                 "qmd_runtime_archive"
 append_var "LITELLM_SOURCE_REPO"                "litellm_source_repo"
 append_var "LITELLM_VERSION"                    "litellm_version"
