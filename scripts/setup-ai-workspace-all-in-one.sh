@@ -1955,7 +1955,6 @@ export XWORKMATE_BRIDGE_PUBLIC_ACCESS="${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}"
 export GATEWAY_OPENCLAW_PUBLIC_ACCESS="${GATEWAY_OPENCLAW_PUBLIC_ACCESS:-false}"
 export VAULT_PUBLIC_ACCESS="${VAULT_PUBLIC_ACCESS:-false}"
 export LITELLM_CADDY_CONFIG_ENABLED="${LITELLM_CADDY_CONFIG_ENABLED:-false}"
-export VAULT_DEPLOY_MODE="${VAULT_DEPLOY_MODE:-standalone}"
 export XWORKMATE_BRIDGE_VALIDATION_BASE_URL="${XWORKMATE_BRIDGE_VALIDATION_BASE_URL:-http://127.0.0.1:8787}"
 
 # Check for commands
@@ -2265,6 +2264,22 @@ export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$UNIFIED_AUTH_TOKEN}"
 export VAULT_TOKEN="${VAULT_TOKEN:-$UNIFIED_AUTH_TOKEN}"
 export VAULT_SERVER_ROOT_ACCESS_TOKEN="${VAULT_SERVER_ROOT_ACCESS_TOKEN:-$UNIFIED_AUTH_TOKEN}"
 export VAULT_ADMIN_PASSWORD="${VAULT_ADMIN_PASSWORD:-$UNIFIED_AUTH_TOKEN}"
+
+detect_vault_mode() {
+    local vault_addr="${VAULT_ADDR:-${VAULT_SERVER_URL:-https://vault.svc.plus}}"
+    local status
+    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
+        "${vault_addr%/}/v1/sys/health" 2>/dev/null || true)"
+    case "$status" in
+        200|429|472|473|501|503) printf '%s\n' "external" ;;
+        *)                       printf '%s\n' "standalone" ;;
+    esac
+}
+
+if [ -z "${VAULT_DEPLOY_MODE:-}" ] || [ "${VAULT_DEPLOY_MODE:-auto}" = "auto" ]; then
+    export VAULT_DEPLOY_MODE="$(detect_vault_mode)"
+    info "Detected Vault deploy mode: $VAULT_DEPLOY_MODE"
+fi
 
 # 5. Handle Ansible Vault password.
 # Keep this separate from the runtime auth token, but reuse DEPLOY_TOKEN for
