@@ -2182,14 +2182,15 @@ append_secret_var "litellm_anthropic_api_key" "${ANTHROPIC_API_KEY:-}"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
 UNIFIED_AUTH_TOKEN="$(resolve_unified_auth_token)"
+VAULT_ROOT_ACCESS_TOKEN="${VAULT_SERVER_ROOT_ACCESS_TOKEN:-$UNIFIED_AUTH_TOKEN}"
 append_secret_var "ai_workspace_auth_token" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "xworkspace_console_auth_token" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "xworkmate_bridge_auth_token" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "litellm_master_key" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "litellm_ui_password" "$UNIFIED_AUTH_TOKEN"
 append_secret_var "gateway_openclaw_gateway_token" "$UNIFIED_AUTH_TOKEN"
-append_secret_var "vault_server_root_access_token" "$UNIFIED_AUTH_TOKEN"
-append_secret_var "vault_root_token" "$UNIFIED_AUTH_TOKEN"
+append_secret_var "vault_server_root_access_token" "$VAULT_ROOT_ACCESS_TOKEN"
+append_secret_var "vault_root_token" "$VAULT_ROOT_ACCESS_TOKEN"
 append_secret_var "vault_admin_password" "$UNIFIED_AUTH_TOKEN"
 ANSIBLE_EXTRA_VARS+=("-e" "vault_admin_init_enabled=true")
 ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_quality_gate_fail_on_error=false")
@@ -2256,7 +2257,7 @@ export XWORKMATE_BRIDGE_AUTH_TOKEN="${XWORKMATE_BRIDGE_AUTH_TOKEN:-$UNIFIED_AUTH
 export LITELLM_MASTER_KEY="${LITELLM_MASTER_KEY:-$UNIFIED_AUTH_TOKEN}"
 export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$UNIFIED_AUTH_TOKEN}"
 export VAULT_TOKEN="${VAULT_TOKEN:-$UNIFIED_AUTH_TOKEN}"
-export VAULT_SERVER_ROOT_ACCESS_TOKEN="${VAULT_SERVER_ROOT_ACCESS_TOKEN:-$UNIFIED_AUTH_TOKEN}"
+export VAULT_SERVER_ROOT_ACCESS_TOKEN="$VAULT_ROOT_ACCESS_TOKEN"
 export VAULT_ADMIN_PASSWORD="${VAULT_ADMIN_PASSWORD:-$UNIFIED_AUTH_TOKEN}"
 
 detect_vault_mode() {
