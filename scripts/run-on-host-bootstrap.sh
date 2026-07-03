@@ -6,6 +6,7 @@ host=${MATRIX_HOST:?MATRIX_HOST is required}
 ssh_key=${SSH_KEY_PATH:-"$HOME/.ssh/id_deploy"}
 ssh_key="${ssh_key/#\~/$HOME}"
 run_id=${GITHUB_RUN_ID:-manual}
+run_attempt=${GITHUB_RUN_ATTEMPT:-1}
 
 ip="$(jq -r --arg host "$host" '.[$host].ip' "$cmdb_path")"
 user="$(jq -r --arg host "$host" '.[$host].ansible_user // "root"' "$cmdb_path")"
