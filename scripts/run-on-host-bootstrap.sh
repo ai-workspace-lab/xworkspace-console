@@ -28,7 +28,7 @@ ssh_opts=(
   -o BatchMode=yes
 )
 
-remote_dir="/tmp/xworkspace-bootstrap-${run_id}-${host//[^A-Za-z0-9_.-]/_}"
+remote_dir="/tmp/xworkspace-bootstrap-${run_id}-${run_attempt}-${host//[^A-Za-z0-9_.-]/_}"
 remote_env="${remote_dir}/env"
 remote_log="${remote_dir}/bootstrap.log"
 remote_rc="${remote_dir}/bootstrap.rc"
