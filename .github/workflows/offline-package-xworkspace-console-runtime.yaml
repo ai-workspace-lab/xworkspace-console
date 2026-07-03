@@ -291,6 +291,9 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
           test "${AI_WORKSPACE_OFFLINE_ACTIVE:-}" = "true"
+          test "${VAULT_ADDR:-}" = "https://vault.example.test"
+          test "${VAULT_SERVER_ROOT_ACCESS_TOKEN:-}" = "vault-root-test-token"
+          test "${VAULT_DEPLOY_MODE:-}" = "external"
           printf 'offline-handoff-ok\n'
           EOF
           chmod +x "${fixture}/scripts/ai-workspace-offline-install.sh"
@@ -300,6 +303,9 @@ jobs:
             AI_WORKSPACE_OFFLINE_DISTRO_ID=${{ matrix.distro }} \
             AI_WORKSPACE_OFFLINE_DISTRO_VERSION=${{ matrix.version }} \
             AI_WORKSPACE_OFFLINE_ARCH=${{ matrix.arch }} \
+            VAULT_ADDR=https://vault.example.test \
+            VAULT_SERVER_ROOT_ACCESS_TOKEN=vault-root-test-token \
+            VAULT_DEPLOY_MODE=external \
             bash scripts/setup-ai-workspace-all-in-one.sh
           )"
           grep -q 'offline-handoff-ok' <<<"${output}"
