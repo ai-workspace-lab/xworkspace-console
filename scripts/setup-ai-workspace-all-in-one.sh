@@ -998,6 +998,40 @@ append_linux_console_identity_vars() {
     ANSIBLE_EXTRA_VARS+=("-e" "litellm_service_home=$console_home")
 }
 
+append_macos_console_identity_vars() {
+    local console_user=$1
+    local console_home=$2
+    local bridge_plugin_dir=$3
+
+    ANSIBLE_EXTRA_VARS+=("-e" "ansible_become=false")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_root=$console_home/.local/state/ai-workspace")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_config_dir=$console_home/.config/ai-workspace")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_scripts_dir=$console_home/xworkspace/scripts")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$XWORKSPACE_CONSOLE_DIR")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_repo=https://github.com/ai-workspace-lab/xworkspace-console.git")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_version=main")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_api_working_dir=$XWORKSPACE_CONSOLE_DIR/api")
+    ANSIBLE_EXTRA_VARS+=("-e" '{"xworkspace_console_api_exec":"/usr/bin/env go run ."}')
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_group=staff")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_ttyd_binary_path=$(command -v ttyd)")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_group=staff")
+    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_user=$console_user")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_group=staff")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_home=$console_home")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_compile_cache_dir=$console_home/.cache/openclaw-compile-cache")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_path=$DARWIN_SERVICE_PATH")
+    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_multi_session_plugin_dir=$bridge_plugin_dir")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_base_dir=$console_home/Library/Application Support/cloud-neutral/xworkmate-bridge")
+    ANSIBLE_EXTRA_VARS+=("-e" "caddy_enabled=false")
+    ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_public_access=false")
+    ANSIBLE_EXTRA_VARS+=("-e" "postgresql_deploy_mode=native")
+    ANSIBLE_EXTRA_VARS+=("-e" "litellm_config_dir=$console_home/.config/litellm")
+}
+
 resolve_unified_auth_token() {
     local token="${AI_WORKSPACE_AUTH_TOKEN:-}"
     if [ -z "$token" ]; then token="${XWORKSPACE_CONSOLE_AUTH_TOKEN:-}"; fi
@@ -2215,39 +2249,16 @@ ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_quality_gate_fail_on_error=false")
 if [ "$(detect_os)" = "darwin" ]; then
     info "Disabling global privilege escalation for macOS..."
     DARWIN_SERVICE_PATH="$HOME/.nix-profile/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin"
-    ANSIBLE_EXTRA_VARS+=("-e" "ansible_become=false")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_user=$(id -un)")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_home=$HOME")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_root=$HOME/.local/state/ai-workspace")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_config_dir=$HOME/.config/ai-workspace")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_scripts_dir=$HOME/xworkspace/scripts")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_repo_dir=$XWORKSPACE_CONSOLE_DIR")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_repo=https://github.com/ai-workspace-lab/xworkspace-console.git")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_source_version=main")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_api_working_dir=$XWORKSPACE_CONSOLE_DIR/api")
-    ANSIBLE_EXTRA_VARS+=("-e" '{"xworkspace_console_api_exec":"/usr/bin/env go run ."}')
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_group=staff")
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkspace_console_ttyd_binary_path=$(command -v ttyd)")
-    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_user=$(id -un)")
-    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_group=staff")
-    ANSIBLE_EXTRA_VARS+=("-e" "agent_skills_home=$HOME")
-    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_user=$(id -un)")
-    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_group=staff")
-    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_home=$HOME")
-    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_compile_cache_dir=$HOME/.cache/openclaw-compile-cache")
-    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_service_path=$DARWIN_SERVICE_PATH")
-    ANSIBLE_EXTRA_VARS+=("-e" "gateway_openclaw_multi_session_plugin_dir=$OPENCLAW_MULTI_SESSION_PLUGIN_DIR")
-    # XWorkMate Bridge writes its runtime data under a base dir that defaults to
-    # /opt/cloud-neutral on Linux. That path is fine on Linux, but on macOS it
-    # is both non-writable under become=false and non-standard for the platform.
-    # Relocate it to the Apple-standard per-user app data location instead.
-    ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_base_dir=$HOME/Library/Application Support/cloud-neutral/xworkmate-bridge")
+    # macOS native deployments do not use the Caddy ingress path. Keep the
+    # bridge local-only so the playbook never tries to create /etc/caddy.
+    # XWorkMate Bridge runtime data also lives under the per-user app data
+    # location on macOS instead of /opt/cloud-neutral.
+    append_macos_console_identity_vars "$(id -un)" "$HOME" "$OPENCLAW_MULTI_SESSION_PLUGIN_DIR"
     # PostgreSQL defaults to compose (Docker) mode, which is inappropriate on a
     # native macOS deploy: it pulls in the apt-based docker role and stores the
     # admin password under /root. Use native mode (Homebrew postgresql@16 via the
     # role's macos.yml) and pass the admin password directly so the default
     # /root/.ai_workspace_postgres_password lookup is never attempted.
-    ANSIBLE_EXTRA_VARS+=("-e" "postgresql_deploy_mode=native")
     append_secret_var "postgresql_admin_password" "$UNIFIED_AUTH_TOKEN"
     # LiteLLM persists its salt key and DB password under /root by default, which
     # is unreadable/unwritable on macOS, so the "Materialize persisted LiteLLM
@@ -2255,9 +2266,6 @@ if [ "$(detect_os)" = "darwin" ]; then
     # the other services on macOS.
     append_secret_var "litellm_salt_key" "$UNIFIED_AUTH_TOKEN"
     append_secret_var "litellm_database_password" "$UNIFIED_AUTH_TOKEN"
-    # litellm_config_dir defaults to /etc/litellm (root-owned). Relocate to a
-    # user-writable path on macOS; config.yaml/litellm.env derive from it.
-    ANSIBLE_EXTRA_VARS+=("-e" "litellm_config_dir=$HOME/.config/litellm")
 else
     LINUX_CONSOLE_USER="$(linux_default_console_user)"
     LINUX_CONSOLE_HOME="$(linux_default_console_home "$LINUX_CONSOLE_USER")"

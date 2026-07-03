@@ -235,6 +235,26 @@ test_linux_root_identity_override_is_rejected() (
     fi
 )
 
+test_macos_identity_vars_disable_caddy() (
+    export XWORKSPACE_CONSOLE_DIR=/Users/shenlan/workspaces/ai-workspace-lab/xworkspace-console
+    export DARWIN_SERVICE_PATH=/opt/homebrew/bin:/usr/bin:/bin
+    # shellcheck disable=SC2329
+    command() {
+        if [ "${1:-}" = "-v" ] && [ "${2:-}" = "ttyd" ]; then
+            printf '/opt/homebrew/bin/ttyd\n'
+            return 0
+        fi
+        builtin command "$@"
+    }
+
+    ANSIBLE_EXTRA_VARS=()
+    append_macos_console_identity_vars shenlan /Users/shenlan "$HOME/.local/share/openclaw-multi-session-plugins"
+
+    printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^caddy_enabled=false$' || fail "macOS deployment still enables Caddy"
+    printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkmate_bridge_public_access=false$' || fail "macOS deployment still exposes bridge publicly"
+    printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkmate_bridge_base_dir=/Users/shenlan/Library/Application Support/cloud-neutral/xworkmate-bridge$' || fail "macOS bridge base dir was not relocated"
+)
+
 test_provider_api_keys_use_secret_logging() {
     local env_name ansible_var
     while read -r env_name ansible_var; do
@@ -320,6 +340,8 @@ test_linux_identity_vars_can_be_overridden
 printf 'ok - Linux deployment identity can be overridden\n'
 test_linux_root_identity_override_is_rejected
 printf 'ok - Linux root service identity overrides are rejected\n'
+test_macos_identity_vars_disable_caddy
+printf 'ok - macOS deployment disables Caddy ingress\n'
 test_provider_api_keys_use_secret_logging
 printf 'ok - provider API keys use masked secret logging\n'
 test_macos_plugin_patch_uses_stable_directory
