@@ -397,16 +397,7 @@ ensure_public_edge_firewall_ports() {
     fi
 
     if command -v ufw >/dev/null 2>&1; then
-        local ufw_status
-        ufw_status="$(ufw status 2>/dev/null || "${sudo_cmd[@]}" ufw status 2>/dev/null || true)"
-        if printf '%s\n' "$ufw_status" | grep -qi '^Status:[[:space:]]*active'; then
-            info "UFW is active; allowing SSH, HTTP, and HTTPS ingress for AI Workspace."
-            "${sudo_cmd[@]}" ufw allow 22/tcp >/dev/null || warn "Unable to allow 22/tcp in UFW."
-            "${sudo_cmd[@]}" ufw allow 80/tcp >/dev/null || warn "Unable to allow 80/tcp in UFW."
-            "${sudo_cmd[@]}" ufw allow 443/tcp >/dev/null || warn "Unable to allow 443/tcp in UFW."
-        else
-            info "UFW is not active; no UFW ingress changes required."
-        fi
+        info "Leaving UFW configuration unchanged; firewall policy is managed by the host operator."
     fi
 
     if command -v firewall-cmd >/dev/null 2>&1; then
