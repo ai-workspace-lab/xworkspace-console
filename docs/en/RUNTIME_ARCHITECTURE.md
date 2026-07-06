@@ -84,10 +84,13 @@ Guard pseudo-code (place in the top-level play of all-in-one):
         fail_msg: "docker and k3s are mutually exclusive; please select a valid combination of docker/k3s/systemd."
 ```
 
-### 4.4 PostgreSQL Default docker compose
+### 4.4 PostgreSQL Deployment Mode Support
 
-- Add switch `postgresql_deploy_mode`, defaulting to `compose`.
-- `compose` mode: Add a compose deployment path in `roles/vhosts/postgres` (fixed image version, reusing existing variables for ports/passwords), coexisting with the current native apt path, choosing one exclusively.
+- Add switch `postgresql_deploy_mode`, defaulting to `compose`. Three modes are supported:
+  - `compose` mode: Run docker compose in `roles/vhosts/postgres` to deploy a local container.
+  - `native` mode: Use native apt / systemd on Linux, and Homebrew postgresql@16 on macOS.
+  - `external` mode: Use an existing external database service, skipping the local installation and startup of PostgreSQL.
+- Support specifying the external database connection via `POSTGRESQL_DATABASE_URL` (format: `postgres://user:password@host:port/database?options`). The setup script will automatically parse this and inject its components into the deployment environment.
 - Do not remove the native apt path (can fallback by setting `postgresql_deploy_mode=native`).
 
 ### 4.5 QMD / LiteLLM Source Repo and Version Pinning

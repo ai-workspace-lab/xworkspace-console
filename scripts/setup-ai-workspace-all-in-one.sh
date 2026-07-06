@@ -28,7 +28,9 @@ set -euo pipefail
 #   VAULT_PUBLIC_ACCESS
 #   XWORKSPACE_CONSOLE_ENABLE_XRDP
 #   AI_WORKSPACE_RUNTIME_MODES (docker,systemd by default; docker and k3s are mutually exclusive)
-#   POSTGRESQL_DEPLOY_MODE (compose by default; native for apt/systemd)
+#   POSTGRESQL_DEPLOY_MODE (compose by default; native for apt/systemd; external to reuse an existing PostgreSQL)
+#   POSTGRESQL_HOST / POSTGRESQL_PORT / POSTGRESQL_ADMIN_USER
+#   POSTGRESQL_ADMIN_PASSWORD / POSTGRES_PASSWORD
 #   AI_WORKSPACE_AUTH_TOKEN / XWORKSPACE_CONSOLE_AUTH_TOKEN
 #     / XWORKMATE_BRIDGE_AUTH_TOKEN / BRIDGE_AUTH_TOKEN / INTERNAL_SERVICE_TOKEN
 #     / DEPLOY_TOKEN
@@ -847,6 +849,13 @@ run_offline_installer() {
         XWORKSPACE_CONSOLE_ENABLE_XRDP \
         AI_WORKSPACE_RUNTIME_MODES \
         POSTGRESQL_DEPLOY_MODE \
+        POSTGRESQL_HOST \
+        POSTGRESQL_PORT \
+        POSTGRESQL_ADMIN_USER \
+        POSTGRESQL_ADMIN_PASSWORD \
+        POSTGRES_PASSWORD \
+        X_MEMORY_HUB_PG_HOST \
+        X_MEMORY_HUB_PG_PORT \
         AI_WORKSPACE_AUTH_TOKEN \
         XWORKSPACE_CONSOLE_AUTH_TOKEN \
         XWORKMATE_BRIDGE_AUTH_TOKEN \
@@ -1028,7 +1037,9 @@ append_macos_console_identity_vars() {
     ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_base_dir=$console_home/Library/Application Support/cloud-neutral/xworkmate-bridge")
     ANSIBLE_EXTRA_VARS+=("-e" "caddy_enabled=false")
     ANSIBLE_EXTRA_VARS+=("-e" "xworkmate_bridge_public_access=false")
-    ANSIBLE_EXTRA_VARS+=("-e" "postgresql_deploy_mode=native")
+    if [ -z "${POSTGRESQL_DEPLOY_MODE:-}" ]; then
+        ANSIBLE_EXTRA_VARS+=("-e" "postgresql_deploy_mode=native")
+    fi
     ANSIBLE_EXTRA_VARS+=("-e" "litellm_config_dir=$console_home/.config/litellm")
 }
 
@@ -2175,6 +2186,73 @@ prefetch_independent_sources
 ensure_core_skills_source
 ensure_xworkmate_bridge_source
 
+detect_vault_mode() {
+    local vault_addr="${VAULT_ADDR:-${VAULT_SERVER_URL:-https://vault.svc.plus}}"
+    local status
+    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
+        "${vault_addr%/}/v1/sys/health" 2>/dev/null || true)"
+    case "$status" in
+        200|429|472|473|501|503) printf '%s\n' "external" ;;
+        *)                       printf '%s\n' "standalone" ;;
+    esac
+}
+
+parse_postgresql_database_url() {
+    local url="${POSTGRESQL_DATABASE_URL:-}"
+    if [ -n "$url" ]; then
+        local without_proto="${url#*://}"
+        local conn_info="${without_proto%%\?*}"
+        
+        if [[ "$conn_info" == *"@"* ]]; then
+            local userinfo="${conn_info%%@*}"
+            local hostinfo="${conn_info#*@}"
+            
+            if [[ "$userinfo" == *":"* ]]; then
+                export POSTGRESQL_ADMIN_USER="${userinfo%%:*}"
+                export POSTGRESQL_ADMIN_PASSWORD="${userinfo#*:}"
+            else
+                export POSTGRESQL_ADMIN_USER="$userinfo"
+            fi
+        else
+            local hostinfo="$conn_info"
+        fi
+        
+        local host_and_port="${hostinfo%%/*}"
+        local dbname="${hostinfo#*/}"
+        
+        if [[ "$host_and_port" == *":"* ]]; then
+            export POSTGRESQL_HOST="${host_and_port%%:*}"
+            export POSTGRESQL_PORT="${host_and_port#*:}"
+        else
+            export POSTGRESQL_HOST="$host_and_port"
+        fi
+        
+        if [ -n "$dbname" ] && [ "$dbname" != "$hostinfo" ]; then
+            export POSTGRESQL_DATABASE="$dbname"
+        fi
+        
+        export DATABASE_URL="${DATABASE_URL:-$POSTGRESQL_DATABASE_URL}"
+    fi
+}
+
+parse_postgresql_database_url
+
+if [ -z "${VAULT_DEPLOY_MODE:-}" ] || [ "${VAULT_DEPLOY_MODE:-auto}" = "auto" ]; then
+    export VAULT_DEPLOY_MODE="$(detect_vault_mode)"
+    info "Detected Vault deploy mode: $VAULT_DEPLOY_MODE"
+fi
+
+if [ -z "${POSTGRESQL_DEPLOY_MODE:-}" ] || [ "${POSTGRESQL_DEPLOY_MODE:-auto}" = "auto" ]; then
+    if [ "$(detect_os)" = "darwin" ]; then
+        export POSTGRESQL_DEPLOY_MODE="native"
+    elif [ -n "${POSTGRESQL_DATABASE_URL:-}" ] || [ "${VAULT_DEPLOY_MODE:-}" = "external" ]; then
+        export POSTGRESQL_DEPLOY_MODE="external"
+    else
+        export POSTGRESQL_DEPLOY_MODE="compose"
+    fi
+    info "Detected PostgreSQL deploy mode: $POSTGRESQL_DEPLOY_MODE"
+fi
+
 # 3. Construct Ansible variables from Environment Variables
 ANSIBLE_EXTRA_VARS=()
 
@@ -2211,6 +2289,13 @@ append_var "VAULT_DEPLOY_MODE"                  "vault_deploy_mode"
 append_var "XWORKSPACE_CONSOLE_ENABLE_XRDP"     "xworkspace_console_enable_xrdp"
 append_var "AI_WORKSPACE_RUNTIME_MODES"         "ai_workspace_runtime_modes"
 append_var "POSTGRESQL_DEPLOY_MODE"             "postgresql_deploy_mode"
+append_var "POSTGRESQL_HOST"                    "postgresql_host"
+append_var "POSTGRESQL_PORT"                    "postgresql_port"
+append_var "POSTGRESQL_ADMIN_USER"              "postgresql_admin_user"
+append_var "POSTGRESQL_DATABASE_URL"             "postgresql_database_url"
+append_var "DATABASE_URL"                        "database_url"
+append_var "X_MEMORY_HUB_PG_HOST"               "x_memory_hub_pg_host"
+append_var "X_MEMORY_HUB_PG_PORT"               "x_memory_hub_pg_port"
 append_var "AI_WORKSPACE_APT_LOCK_TIMEOUT"      "ai_workspace_apt_lock_timeout"
 append_var "XWORKSPACE_CONSOLE_SOURCE_REPO"     "xworkspace_console_source_repo"
 append_var "XWORKSPACE_CONSOLE_SOURCE_VERSION"  "xworkspace_console_source_version"
@@ -2230,6 +2315,7 @@ append_secret_var "litellm_ollama_api_key" "${OLLAMA_API_KEY:-}"
 append_secret_var "litellm_gemini_api_key" "${GEMINI_API_KEY:-}"
 append_secret_var "litellm_openai_api_key" "${OPENAI_API_KEY:-}"
 append_secret_var "litellm_anthropic_api_key" "${ANTHROPIC_API_KEY:-}"
+append_secret_var "postgresql_admin_password" "${POSTGRESQL_ADMIN_PASSWORD:-${POSTGRES_PASSWORD:-}}"
 
 # 4. Resolve one auth token for the bridge and downstream service UIs/APIs.
 UNIFIED_AUTH_TOKEN="$(resolve_unified_auth_token)"
@@ -2284,22 +2370,6 @@ export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-$UNIFIED_AUTH_TOKEN}"
 export VAULT_TOKEN="${VAULT_TOKEN:-$UNIFIED_AUTH_TOKEN}"
 export VAULT_SERVER_ROOT_ACCESS_TOKEN="$VAULT_ROOT_ACCESS_TOKEN"
 export VAULT_ADMIN_PASSWORD="${VAULT_ADMIN_PASSWORD:-$UNIFIED_AUTH_TOKEN}"
-
-detect_vault_mode() {
-    local vault_addr="${VAULT_ADDR:-${VAULT_SERVER_URL:-https://vault.svc.plus}}"
-    local status
-    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
-        "${vault_addr%/}/v1/sys/health" 2>/dev/null || true)"
-    case "$status" in
-        200|429|472|473|501|503) printf '%s\n' "external" ;;
-        *)                       printf '%s\n' "standalone" ;;
-    esac
-}
-
-if [ -z "${VAULT_DEPLOY_MODE:-}" ] || [ "${VAULT_DEPLOY_MODE:-auto}" = "auto" ]; then
-    export VAULT_DEPLOY_MODE="$(detect_vault_mode)"
-    info "Detected Vault deploy mode: $VAULT_DEPLOY_MODE"
-fi
 
 # 5. Handle Ansible Vault password.
 # Keep this separate from the runtime auth token, but reuse DEPLOY_TOKEN for

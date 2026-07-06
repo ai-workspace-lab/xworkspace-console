@@ -161,6 +161,38 @@ EOF
     rm -rf "$installer_root"
 )
 
+test_offline_installer_preserves_postgresql_external_env() (
+    installer_root="$(mktemp -d)"
+    mkdir -p "$installer_root/scripts"
+    cat > "$installer_root/scripts/ai-workspace-offline-install.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${POSTGRESQL_DEPLOY_MODE:-}" = "external" ]
+[ "${POSTGRESQL_HOST:-}" = "127.0.0.1" ]
+[ "${POSTGRESQL_PORT:-}" = "5432" ]
+[ "${POSTGRESQL_ADMIN_USER:-}" = "postgres" ]
+[ "${POSTGRESQL_ADMIN_PASSWORD:-}" = "secret" ]
+[ "${X_MEMORY_HUB_PG_HOST:-}" = "127.0.0.1" ]
+[ "${X_MEMORY_HUB_PG_PORT:-}" = "5432" ]
+EOF
+    chmod +x "$installer_root/scripts/ai-workspace-offline-install.sh"
+    # shellcheck disable=SC2329
+    validate_offline_package_target() { :; }
+    # shellcheck disable=SC2329
+    id() {
+        [ "${1:-}" = "-u" ] && printf '0\n'
+    }
+    POSTGRESQL_DEPLOY_MODE=external \
+        POSTGRESQL_HOST=127.0.0.1 \
+        POSTGRESQL_PORT=5432 \
+        POSTGRESQL_ADMIN_USER=postgres \
+        POSTGRESQL_ADMIN_PASSWORD=secret \
+        X_MEMORY_HUB_PG_HOST=127.0.0.1 \
+        X_MEMORY_HUB_PG_PORT=5432 \
+        run_offline_installer "$installer_root" "debian 13 amd64"
+    rm -rf "$installer_root"
+)
+
 test_linux_root_defaults_to_ubuntu_home() (
     # shellcheck disable=SC2329
     id() {
@@ -255,6 +287,27 @@ test_macos_identity_vars_disable_caddy() (
     printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^xworkmate_bridge_base_dir=/Users/shenlan/Library/Application Support/cloud-neutral/xworkmate-bridge$' || fail "macOS bridge base dir was not relocated"
 )
 
+test_macos_identity_vars_preserve_explicit_postgresql_mode() (
+    export XWORKSPACE_CONSOLE_DIR=/Users/shenlan/workspaces/ai-workspace-lab/xworkspace-console
+    export DARWIN_SERVICE_PATH=/opt/homebrew/bin:/usr/bin:/bin
+    export POSTGRESQL_DEPLOY_MODE=external
+    # shellcheck disable=SC2329
+    command() {
+        if [ "${1:-}" = "-v" ] && [ "${2:-}" = "ttyd" ]; then
+            printf '/opt/homebrew/bin/ttyd\n'
+            return 0
+        fi
+        builtin command "$@"
+    }
+
+    ANSIBLE_EXTRA_VARS=()
+    append_macos_console_identity_vars shenlan /Users/shenlan "$HOME/.local/share/openclaw-multi-session-plugins"
+
+    if printf '%s\n' "${ANSIBLE_EXTRA_VARS[@]}" | grep -q '^postgresql_deploy_mode=native$'; then
+        fail "macOS identity vars overrode explicit PostgreSQL external mode"
+    fi
+)
+
 test_provider_api_keys_use_secret_logging() {
     local env_name ansible_var
     while read -r env_name ansible_var; do
@@ -332,6 +385,8 @@ test_dynamic_parallel_limit_avoids_awk_reserved_names
 printf 'ok - dynamic parallel limit is compatible with modern gawk\n'
 test_offline_installer_gets_scoped_git_config
 printf 'ok - offline installer receives scoped Git ownership compatibility\n'
+test_offline_installer_preserves_postgresql_external_env
+printf 'ok - offline installer preserves PostgreSQL external env\n'
 test_linux_root_defaults_to_ubuntu_home
 printf 'ok - Linux root deployment defaults to ubuntu home\n'
 test_linux_non_root_uses_current_user_home
@@ -342,6 +397,8 @@ test_linux_root_identity_override_is_rejected
 printf 'ok - Linux root service identity overrides are rejected\n'
 test_macos_identity_vars_disable_caddy
 printf 'ok - macOS deployment disables Caddy ingress\n'
+test_macos_identity_vars_preserve_explicit_postgresql_mode
+printf 'ok - macOS deployment preserves explicit PostgreSQL mode\n'
 test_provider_api_keys_use_secret_logging
 printf 'ok - provider API keys use masked secret logging\n'
 test_macos_plugin_patch_uses_stable_directory

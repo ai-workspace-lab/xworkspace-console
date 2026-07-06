@@ -69,7 +69,8 @@ First non-empty of: `AI_WORKSPACE_AUTH_TOKEN` → `XWORKSPACE_CONSOLE_AUTH_TOKEN
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `AI_WORKSPACE_RUNTIME_MODES` | `docker,systemd` | Runtime modes; `docker` and `k3s` are mutually exclusive. |
-| `POSTGRESQL_DEPLOY_MODE` | `compose` | `native` for apt/systemd. |
+| `POSTGRESQL_DEPLOY_MODE` | `compose` | Deployment mode: `compose` (Docker container), `native` (Linux apt/systemd, macOS Homebrew), or `external` (existing external database, skips local install/start). Defaults to `external` if `VAULT_DEPLOY_MODE=external` or if `POSTGRESQL_DATABASE_URL` is set. |
+| `POSTGRESQL_DATABASE_URL` | none | External PostgreSQL database URL (e.g. `postgres://account:<masked_token>@127.0.0.1:15432/account?sslmode=disable`). Specifying this will automatically parse the host/port/user/password components and inject them into the deployment environment. |
 
 ### 4.4 Offline Package (acceleration / air-gap)
 

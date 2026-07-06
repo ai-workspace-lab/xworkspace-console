@@ -84,10 +84,13 @@ setup-ai-workspace-all-in-one.sh            [repo: xworkspace-console/scripts]
         fail_msg: "docker 与 k3s 互斥；请选择 docker/k3s/systemd 的合法组合。"
 ```
 
-### 4.4 PostgreSQL 默认 docker compose
+### 4.4 PostgreSQL 部署模式支持
 
-- 新增开关 `postgresql_deploy_mode`，默认 `compose`。
-- `compose` 模式：在 `roles/vhosts/postgres` 增加一条 compose 部署路径（镜像版本固定，端口/口令复用现有变量），与现有原生 apt 路径并存、互斥择一。
+- 新增开关 `postgresql_deploy_mode`，默认 `compose`。支持以下三种模式：
+  - `compose` 模式：在 `roles/vhosts/postgres` 运行 docker compose 部署本地容器。
+  - `native` 模式：在 Linux 下使用原生 apt / systemd，在 macOS 下使用 Homebrew postgresql@16。
+  - `external` 模式：使用外部已有数据库服务，跳过本地 PostgreSQL 实例的安装和启动。
+- 支持通过 `POSTGRESQL_DATABASE_URL` 指定外部数据库链接（格式：`postgres://user:password@host:port/database?options`）。安装脚本将自动解析并将其组件注入部署环境。
 - 不删除原生 apt 路径（设 `postgresql_deploy_mode=native` 可回退）。
 
 ### 4.5 QMD / LiteLLM 源仓库与版本固定

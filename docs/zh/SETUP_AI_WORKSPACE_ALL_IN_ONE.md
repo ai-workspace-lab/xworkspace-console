@@ -71,7 +71,8 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `AI_WORKSPACE_RUNTIME_MODES` | `docker,systemd` | 运行时形态组合；`docker` 与 `k3s` 互斥。 |
-| `POSTGRESQL_DEPLOY_MODE` | `compose` | `native` 走 apt/systemd。 |
+| `POSTGRESQL_DEPLOY_MODE` | `compose` | 部署模式：`compose`（Docker 容器）、`native`（Linux apt/systemd，macOS Homebrew）、`external`（外部已有数据库，跳过本地安装启动）。若 `VAULT_DEPLOY_MODE=external` 或提供了 `POSTGRESQL_DATABASE_URL`，默认自动设为 `external`。 |
+| `POSTGRESQL_DATABASE_URL` | 无 | 外部 PostgreSQL 数据库 URL 链接（例：`postgres://account:<masked_token>@127.0.0.1:15432/account?sslmode=disable`），设为此项时会自动解析其中的 Host/Port/User/Password 并注入部署环境。 |
 
 ### 4.4 离线包（加速 / 气隙）
 
