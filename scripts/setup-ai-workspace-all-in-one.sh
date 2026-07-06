@@ -2208,10 +2208,10 @@ parse_postgresql_database_url() {
             local hostinfo="${conn_info#*@}"
             
             if [[ "$userinfo" == *":"* ]]; then
-                export POSTGRESQL_ADMIN_USER="${userinfo%%:*}"
-                export POSTGRESQL_ADMIN_PASSWORD="${userinfo#*:}"
+                export POSTGRESQL_ADMIN_USER="${POSTGRESQL_ADMIN_USER:-${userinfo%%:*}}"
+                export POSTGRESQL_ADMIN_PASSWORD="${POSTGRESQL_ADMIN_PASSWORD:-${userinfo#*:}}"
             else
-                export POSTGRESQL_ADMIN_USER="$userinfo"
+                export POSTGRESQL_ADMIN_USER="${POSTGRESQL_ADMIN_USER:-$userinfo}"
             fi
         else
             local hostinfo="$conn_info"
@@ -2221,14 +2221,14 @@ parse_postgresql_database_url() {
         local dbname="${hostinfo#*/}"
         
         if [[ "$host_and_port" == *":"* ]]; then
-            export POSTGRESQL_HOST="${host_and_port%%:*}"
-            export POSTGRESQL_PORT="${host_and_port#*:}"
+            export POSTGRESQL_HOST="${POSTGRESQL_HOST:-${host_and_port%%:*}}"
+            export POSTGRESQL_PORT="${POSTGRESQL_PORT:-${host_and_port#*:}}"
         else
-            export POSTGRESQL_HOST="$host_and_port"
+            export POSTGRESQL_HOST="${POSTGRESQL_HOST:-$host_and_port}"
         fi
         
         if [ -n "$dbname" ] && [ "$dbname" != "$hostinfo" ]; then
-            export POSTGRESQL_DATABASE="$dbname"
+            export POSTGRESQL_DATABASE="${POSTGRESQL_DATABASE:-$dbname}"
         fi
         
         export DATABASE_URL="${DATABASE_URL:-$POSTGRESQL_DATABASE_URL}"
