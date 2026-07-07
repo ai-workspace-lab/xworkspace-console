@@ -73,6 +73,8 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 | `AI_WORKSPACE_RUNTIME_MODES` | `docker,systemd` | 运行时形态组合；`docker` 与 `k3s` 互斥。 |
 | `POSTGRESQL_DEPLOY_MODE` | `compose` | 部署模式：`compose`（Docker 容器）、`native`（Linux apt/systemd，macOS Homebrew）、`external`（外部已有数据库，跳过本地安装启动）。若 `VAULT_DEPLOY_MODE=external` 或提供了 `POSTGRESQL_DATABASE_URL`，默认自动设为 `external`。 |
 | `POSTGRESQL_DATABASE_URL` | 无 | 外部 PostgreSQL 数据库 URL 链接（例：`postgres://account:<masked_token>@127.0.0.1:15432/account?sslmode=disable`），设为此项时会自动解析其中的 Host/Port/User/Password 并注入部署环境。 |
+| `POSTGRESQL_ADMIN_USER` | `postgres` | 外部 PostgreSQL 的超级管理员用户名。在 `external` 部署模式下用以执行建库建用户操作。若未显式指定，会自动从 `POSTGRESQL_DATABASE_URL` 中解析，但请注意，若 URL 为普通用户，建议显式声明此管理员账号以确保建库权限。 |
+| `POSTGRESQL_ADMIN_PASSWORD` | 无 | 外部 PostgreSQL 超级管理员的密码。若未显式设置，将尝试从 `POSTGRESQL_DATABASE_URL` 解析或读取本地密码影子文件 `/root/.ai_workspace_postgres_password`（Debian/Ubuntu 部署时）。 |
 
 ### 4.4 离线包（加速 / 气隙）
 
@@ -111,6 +113,7 @@ curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/
 | `XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE` / `QMD_RUNTIME_ARCHIVE` | 预编译 runtime tar 路径（离线）。 |
 | `LITELLM_PACKAGE_SPEC` / `AI_WORKSPACE_PREBUILT_COMPONENTS_REQUIRED` | LiteLLM 包规格 / 强制要求预编译组件。 |
 | `OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC` / `OPENCLAW_MULTI_SESSION_PLUGIN_DIR` | OpenClaw 多会话插件源 / 本地检出（macOS link 安装）。 |
+| `BRANCH` | 部署使用的 playbooks 仓库的 Git 分支、Tag 或 commit hash。在线安装时支持通过在部署链接路径后缀中指定（例：`curl -sfL https://install.svc.plus/ai-workspace/v1.1.5 | bash`），或显式指定本变量。 |
 
 ## 5. 目标主机示例
 

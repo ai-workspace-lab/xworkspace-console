@@ -71,6 +71,8 @@ First non-empty of: `AI_WORKSPACE_AUTH_TOKEN` → `XWORKSPACE_CONSOLE_AUTH_TOKEN
 | `AI_WORKSPACE_RUNTIME_MODES` | `docker,systemd` | Runtime modes; `docker` and `k3s` are mutually exclusive. |
 | `POSTGRESQL_DEPLOY_MODE` | `compose` | Deployment mode: `compose` (Docker container), `native` (Linux apt/systemd, macOS Homebrew), or `external` (existing external database, skips local install/start). Defaults to `external` if `VAULT_DEPLOY_MODE=external` or if `POSTGRESQL_DATABASE_URL` is set. |
 | `POSTGRESQL_DATABASE_URL` | none | External PostgreSQL database URL (e.g. `postgres://account:<masked_token>@127.0.0.1:15432/account?sslmode=disable`). Specifying this will automatically parse the host/port/user/password components and inject them into the deployment environment. |
+| `POSTGRESQL_ADMIN_USER` | `postgres` | Superuser username for external PostgreSQL. Used in `external` mode to provision databases and users. If unset, parsed from `POSTGRESQL_DATABASE_URL` (but note that if the URL uses a non-admin user, you should explicitly set this to ensure creation privileges). |
+| `POSTGRESQL_ADMIN_PASSWORD` | none | Superuser password for external PostgreSQL. If unset, parsed from `POSTGRESQL_DATABASE_URL` or read from target shadow file `/root/.ai_workspace_postgres_password` (for Debian/Ubuntu targets). |
 
 ### 4.4 Offline Package (acceleration / air-gap)
 
@@ -109,6 +111,7 @@ First non-empty of: `AI_WORKSPACE_AUTH_TOKEN` → `XWORKSPACE_CONSOLE_AUTH_TOKEN
 | `XWORKSPACE_CONSOLE_RUNTIME_ARCHIVE` / `QMD_RUNTIME_ARCHIVE` | Prebuilt runtime tar paths (offline). |
 | `LITELLM_PACKAGE_SPEC` / `AI_WORKSPACE_PREBUILT_COMPONENTS_REQUIRED` | LiteLLM package spec / require prebuilt components. |
 | `OPENCLAW_MULTI_SESSION_PLUGIN_PACKAGE_SPEC` / `OPENCLAW_MULTI_SESSION_PLUGIN_DIR` | OpenClaw plugin source / local checkout (macOS link install). |
+| `BRANCH` | Git branch, tag, or commit hash of the playbooks repository to deploy. Supported by suffixing the installer URL path (e.g. `curl -sfL https://install.svc.plus/ai-workspace/v1.1.5 | bash`), or by setting this variable explicitly. |
 
 ## 5. Target Host Example
 
