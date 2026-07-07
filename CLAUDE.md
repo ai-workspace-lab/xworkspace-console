@@ -32,10 +32,10 @@ run: |
 - name: Configure remote backend
   env:
     TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
-  run: python3 $GITHUB_WORKSPACE/${{ env.VPS_ROOT }}/scripts/render_backend_tf.py backend.tf
+  run: python3 $GITHUB_WORKSPACE/infra/iac_modules/terraform-hcl-standard/utils/render_provider_backend.py backend.tf
 ```
 
-渲染脚本存放在 `ai-workspace-infra/iac_modules/terraform-hcl-standard/vultr-vps/scripts/`，
+渲染脚本存放在 `ai-workspace-infra/iac_modules/terraform-hcl-standard/utils/`，
 通过 workflow 内已有的 `Checkout iac_modules` 步骤引用，无需额外 self-checkout。
 workflow 内的 `run:` 块调用外置脚本，命名规范 `动词_名词.py` 或 `动词-名词.sh`。
 
