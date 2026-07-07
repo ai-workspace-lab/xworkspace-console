@@ -2191,14 +2191,11 @@ ensure_core_skills_source
 ensure_xworkmate_bridge_source
 
 detect_vault_mode() {
-    local vault_addr="${VAULT_ADDR:-${VAULT_SERVER_URL:-https://vault.svc.plus}}"
-    local status
-    status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 \
-        "${vault_addr%/}/v1/sys/health" 2>/dev/null || true)"
-    case "$status" in
-        200|429|472|473|501|503) printf '%s\n' "external" ;;
-        *)                       printf '%s\n' "standalone" ;;
-    esac
+    # The user specifically requested that fresh deployments should not depend on
+    # an external Vault instance unless VAULT_DEPLOY_MODE=external is explicitly defined.
+    # Therefore, we no longer aggressively auto-detect external Vaults via ping,
+    # and default to 'standalone'.
+    printf '%s\n' "standalone"
 }
 
 parse_postgresql_database_url() {
