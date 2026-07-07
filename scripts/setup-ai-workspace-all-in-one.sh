@@ -64,7 +64,11 @@ set -euo pipefail
 
 REPO_URL=${REPO_URL:-"https://github.com/ai-workspace-infra/playbooks.git"}
 BRANCH=${BRANCH:-"main"}
-TARGET_DIR=${TARGET_DIR:-"/tmp/ai-workspace-deploy"}
+TARGET_DIR=${TARGET_DIR:-""}
+if [ -z "$TARGET_DIR" ]; then
+    TARGET_DIR="$(mktemp -d /tmp/ai-workspace-deploy.XXXXXX)"
+    trap 'rm -rf "$TARGET_DIR"' EXIT
+fi
 PLAYBOOK_DIR=${PLAYBOOK_DIR:-""}
 XWORKSPACE_CONSOLE_REPO_URL=${XWORKSPACE_CONSOLE_REPO_URL:-"https://github.com/ai-workspace-lab/xworkspace-console.git"}
 XWORKSPACE_CONSOLE_DIR=${XWORKSPACE_CONSOLE_DIR:-""}
@@ -2166,7 +2170,7 @@ if [ -n "$PLAYBOOK_DIR" ]; then
             info "Network is unreachable. Using cached offline playbooks."
         fi
     fi
-elif [ -d "$TARGET_DIR" ]; then
+elif [ -d "$TARGET_DIR/.git" ]; then
     info "Updating existing repository in $TARGET_DIR..."
     cd "$TARGET_DIR"
     git fetch origin
