@@ -270,6 +270,7 @@ mask_secret() {
 
 if command -v git >/dev/null 2>&1; then
     git config --global --add safe.directory '*' || true
+    git config --system --add safe.directory '*' || true
 fi
 
 detect_os() {
@@ -2007,6 +2008,7 @@ fi
 
 # Git may have been installed after the early best-effort configuration above.
 git config --global --add safe.directory '*' || true
+git config --system --add safe.directory '*' || true
 
 export XWORKSPACE_CONSOLE_PUBLIC_ACCESS="${XWORKSPACE_CONSOLE_PUBLIC_ACCESS:-false}"
 export XWORKMATE_BRIDGE_PUBLIC_ACCESS="${XWORKMATE_BRIDGE_PUBLIC_ACCESS:-true}"
