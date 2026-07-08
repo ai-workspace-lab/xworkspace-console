@@ -52,6 +52,7 @@ trap 'rm -f "$remote_payload"' EXIT
   printf 'DEEPSEEK_API_KEY=%q\n' "${DEEPSEEK_API_KEY:-}"
   printf 'NVIDIA_API_KEY=%q\n' "${NVIDIA_API_KEY:-}"
   printf 'OLLAMA_API_KEY=%q\n' "${OLLAMA_API_KEY:-}"
+  printf 'AI_WORKSPACE_BRANCH=%q\n' "${GITHUB_REF_NAME:-main}"
 } > "$remote_payload"
 
 ssh "${ssh_opts[@]}" "${user}@${ip}" "mkdir -p '$remote_dir' && chmod 700 '$remote_dir'"
@@ -70,8 +71,8 @@ fi
 (
   set +e
   source "$remote_env"
-  export AI_WORKSPACE_OFFLINE_MODE XWORKMATE_BRIDGE_DOMAIN AI_WORKSPACE_AUTH_TOKEN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY
-  bash -lc 'curl -sfL https://install.svc.plus/ai-workspace | bash -'
+  export AI_WORKSPACE_OFFLINE_MODE XWORKMATE_BRIDGE_DOMAIN AI_WORKSPACE_AUTH_TOKEN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY AI_WORKSPACE_BRANCH
+  bash -lc "curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/${AI_WORKSPACE_BRANCH}/scripts/setup-ai-workspace-all-in-one.sh | bash -"
   rc=$?
   printf '%s\n' "$rc" > "$remote_rc"
   exit "$rc"
