@@ -2251,7 +2251,7 @@ if [ -z "${POSTGRESQL_DEPLOY_MODE:-}" ] || [ "${POSTGRESQL_DEPLOY_MODE:-auto}" =
     elif [ -n "${POSTGRESQL_DATABASE_URL:-}" ] || [ "${VAULT_DEPLOY_MODE:-}" = "external" ]; then
         export POSTGRESQL_DEPLOY_MODE="external"
     else
-        export POSTGRESQL_DEPLOY_MODE="compose"
+        export POSTGRESQL_DEPLOY_MODE="native"
     fi
     info "Detected PostgreSQL deploy mode: $POSTGRESQL_DEPLOY_MODE"
 fi
