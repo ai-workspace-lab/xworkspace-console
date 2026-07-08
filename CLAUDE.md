@@ -29,13 +29,15 @@ run: |
 
 ```yaml
 # ✅ 正确 — 外置 Python 脚本（放在 infra repo，通过已有 checkout 引用）
-- name: Configure remote backend
+- name: generate.py render (YAML -> 显式 HCL + tfvars)
+  working-directory: ${{ env.VPS_ROOT }}
   env:
     TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
-  run: python3 $GITHUB_WORKSPACE/infra/iac_modules/terraform-hcl-standard/utils/render_provider_backend.py backend.tf
+    TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
+  run: python3 scripts/generate.py render
 ```
 
-渲染脚本存放在 `ai-workspace-infra/iac_modules/terraform-hcl-standard/utils/`，
+渲染脚本存放在 `ai-workspace-infra/iac_modules/terraform-hcl-standard/vultr-vps/scripts/`，
 通过 workflow 内已有的 `Checkout iac_modules` 步骤引用，无需额外 self-checkout。
 workflow 内的 `run:` 块调用外置脚本，命名规范 `动词_名词.py` 或 `动词-名词.sh`。
 

@@ -230,15 +230,11 @@ jobs:
       - name: Install render deps
         run: pip install --quiet pyyaml jinja2
 
-      - name: Configure remote backend (S3-compatible, required)
-        working-directory: ${{ env.ENV_DIR }}
+      - name: generate.py render (YAML -> 显式 HCL + tfvars)
+        working-directory: ${{ env.VPS_ROOT }}
         env:
           TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
           TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
-        run: python3 $GITHUB_WORKSPACE/infra/iac_modules/terraform-hcl-standard/utils/render_provider_backend.py backend.tf
-
-      - name: generate.py render (YAML -> 显式 HCL + tfvars)
-        working-directory: ${{ env.VPS_ROOT }}
         run: python3 scripts/generate.py render
 
       - name: Terraform init
