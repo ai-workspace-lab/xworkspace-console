@@ -235,7 +235,7 @@ jobs:
         env:
           TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
           TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
-        run: python3 $GITHUB_WORKSPACE/${{ env.VPS_ROOT }}/scripts/render_backend_tf.py backend.tf
+        run: python3 $GITHUB_WORKSPACE/infra/iac_modules/terraform-hcl-standard/utils/render_provider_backend.py backend.tf
 
       - name: generate.py render (YAML -> 显式 HCL + tfvars)
         working-directory: ${{ env.VPS_ROOT }}
