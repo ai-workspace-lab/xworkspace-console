@@ -53,6 +53,8 @@ trap 'rm -f "$remote_payload"' EXIT
   printf 'NVIDIA_API_KEY=%q\n' "${NVIDIA_API_KEY:-}"
   printf 'OLLAMA_API_KEY=%q\n' "${OLLAMA_API_KEY:-}"
   printf 'AI_WORKSPACE_BRANCH=%q\n' "${GITHUB_REF_NAME:-main}"
+  # BRANCH controls which branch of ai-workspace-infra/playbooks is cloned on-host.
+  printf 'BRANCH=%q\n' "${PLAYBOOKS_BRANCH:-fix-standalone-vault}"
 } > "$remote_payload"
 
 ssh "${ssh_opts[@]}" "${user}@${ip}" "mkdir -p '$remote_dir' && chmod 700 '$remote_dir'"
@@ -71,7 +73,7 @@ fi
 (
   set +e
   source "$remote_env"
-  export AI_WORKSPACE_OFFLINE_MODE XWORKMATE_BRIDGE_DOMAIN AI_WORKSPACE_AUTH_TOKEN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY AI_WORKSPACE_BRANCH
+  export AI_WORKSPACE_OFFLINE_MODE XWORKMATE_BRIDGE_DOMAIN AI_WORKSPACE_AUTH_TOKEN DEEPSEEK_API_KEY NVIDIA_API_KEY OLLAMA_API_KEY AI_WORKSPACE_BRANCH BRANCH
   bash -lc "curl -sfL https://raw.githubusercontent.com/ai-workspace-lab/xworkspace-console/${AI_WORKSPACE_BRANCH}/scripts/setup-ai-workspace-all-in-one.sh | bash -"
   rc=$?
   printf '%s\n' "$rc" > "$remote_rc"
