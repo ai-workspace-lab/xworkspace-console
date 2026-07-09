@@ -86,6 +86,30 @@ def main():
         )
         if boot_old in tasks_text and boot_new not in tasks_text:
             tasks_text = tasks_text.replace(boot_old, boot_new, 1)
+
+        kv_old = (
+            '- name: Bootstrap Vault admin userpass auth\n'
+            '  ansible.builtin.script: >-\n'
+        )
+        kv_new = (
+            '- name: Ensure Vault KV v2 secrets engine is enabled\n'
+            '  ansible.builtin.command: >-\n'
+            "    bash -lc '\n"
+            "    if ! vault secrets list -format=json | jq -e \"has(\\\"kv/\\\")\" >/dev/null; then\n"
+            "      vault secrets enable -version=2 kv >/dev/null\n"
+            "    fi'\n"
+            '  environment:\n'
+            '    PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}"\n'
+            '    VAULT_ADDR: "{{ vault_admin_addr }}"\n'
+            '    VAULT_TOKEN: "{{ vault_server_root_access_token }}"\n'
+            '  changed_when: false\n'
+            '  when:\n'
+            '    - vault_deploy_mode in ["standalone", "external"]\n\n'
+            '- name: Bootstrap Vault admin userpass auth\n'
+            '  ansible.builtin.script: >-\n'
+        )
+        if kv_old in tasks_text and "Ensure Vault KV v2 secrets engine is enabled" not in tasks_text:
+            tasks_text = tasks_text.replace(kv_old, kv_new, 1)
         
         tasks_path.write_text(tasks_text)
         
