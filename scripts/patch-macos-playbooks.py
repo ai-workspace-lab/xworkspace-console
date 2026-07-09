@@ -829,6 +829,49 @@ def main():
         postgres_compose = Path("roles/vhosts/postgres/tasks/compose.yml")
         if postgres_compose.exists():
             text = postgres_compose.read_text()
+            docker_runtime_old = (
+                "- name: Ensure Docker runtime is installed for PostgreSQL compose mode\n"
+                "  ansible.builtin.include_role:\n"
+                "    name: roles/vhosts/docker\n"
+                "  when: postgresql_docker_version.rc != 0\n"
+            )
+            docker_runtime_new = (
+                "- name: Ensure Docker runtime is installed for PostgreSQL compose mode\n"
+                "  ansible.builtin.include_role:\n"
+                "    name: roles/vhosts/docker\n"
+                "  when: postgresql_docker_version.rc != 0\n"
+                "\n"
+                "- name: Inspect Docker daemon for PostgreSQL compose mode\n"
+                "  ansible.builtin.command: docker info\n"
+                "  register: postgresql_docker_info\n"
+                "  changed_when: false\n"
+                "  failed_when: false\n"
+                "\n"
+                "- name: Start Colima Docker daemon for PostgreSQL compose mode (macOS)\n"
+                "  ansible.builtin.command: colima start\n"
+                "  register: postgresql_colima_start\n"
+                "  changed_when: >-\n"
+                "    'already running' not in (postgresql_colima_start.stdout | default(''))\n"
+                "    and 'already running' not in (postgresql_colima_start.stderr | default(''))\n"
+                "  when:\n"
+                "    - ansible_os_family == 'Darwin'\n"
+                "    - postgresql_docker_info.rc != 0\n"
+                "\n"
+                "- name: Wait for Docker daemon after Colima start (macOS)\n"
+                "  ansible.builtin.command: docker info\n"
+                "  register: postgresql_docker_info_after_colima\n"
+                "  changed_when: false\n"
+                "  retries: 12\n"
+                "  delay: 5\n"
+                "  until: postgresql_docker_info_after_colima.rc == 0\n"
+                "  when:\n"
+                "    - ansible_os_family == 'Darwin'\n"
+                "    - postgresql_docker_info.rc != 0\n"
+            )
+            if "Start Colima Docker daemon for PostgreSQL compose mode" not in text and docker_runtime_old in text:
+                text = text.replace(docker_runtime_old, docker_runtime_new, 1)
+                postgres_compose.write_text(text)
+
             old = (
                 "  ansible.builtin.file:\n"
                 "    path: \"{{ postgresql_compose_project_dir }}\"\n"
