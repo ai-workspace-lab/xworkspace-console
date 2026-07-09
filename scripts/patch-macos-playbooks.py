@@ -86,6 +86,30 @@ def main():
         )
         if boot_old in tasks_text and boot_new not in tasks_text:
             tasks_text = tasks_text.replace(boot_old, boot_new, 1)
+
+        kv_old = (
+            '- name: Bootstrap Vault admin userpass auth\n'
+            '  ansible.builtin.script: >-\n'
+        )
+        kv_new = (
+            '- name: Ensure Vault KV v2 secrets engine is enabled\n'
+            '  ansible.builtin.command: >-\n'
+            "    bash -lc '\n"
+            "    if ! vault secrets list -format=json | jq -e \"has(\\\"kv/\\\")\" >/dev/null; then\n"
+            "      vault secrets enable -version=2 kv >/dev/null\n"
+            "    fi'\n"
+            '  environment:\n'
+            '    PATH: "/opt/homebrew/bin:/usr/local/bin:{{ ansible_env.PATH }}"\n'
+            '    VAULT_ADDR: "{{ vault_admin_addr }}"\n'
+            '    VAULT_TOKEN: "{{ vault_server_root_access_token }}"\n'
+            '  changed_when: false\n'
+            '  when:\n'
+            '    - vault_deploy_mode in ["standalone", "external"]\n\n'
+            '- name: Bootstrap Vault admin userpass auth\n'
+            '  ansible.builtin.script: >-\n'
+        )
+        if kv_old in tasks_text and "Ensure Vault KV v2 secrets engine is enabled" not in tasks_text:
+            tasks_text = tasks_text.replace(kv_old, kv_new, 1)
         
         tasks_path.write_text(tasks_text)
         
@@ -766,6 +790,209 @@ def main():
             path.write_text(text)
 
     patch_6()
+
+    def patch_7():
+        
+        postgres_tasks = Path("roles/vhosts/postgres/tasks/main.yml")
+        if postgres_tasks.exists():
+            text = postgres_tasks.read_text()
+            if "postgresql_deploy_mode_effective" not in text:
+                text = text.replace(
+                    "- name: Validate PostgreSQL deploy mode\n"
+                    "  ansible.builtin.assert:\n"
+                    "    that:\n"
+                    "      - postgresql_deploy_mode in ['compose', 'native', 'external']\n"
+                    "    fail_msg: \"postgresql_deploy_mode must be 'compose', 'native', or 'external'.\"\n",
+                    "- name: Normalize PostgreSQL deploy mode\n"
+                    "  ansible.builtin.set_fact:\n"
+                    "    postgresql_deploy_mode_effective: >-\n"
+                    "      {{ 'native' if (postgresql_deploy_mode | default('native')) == 'standalone' else (postgresql_deploy_mode | default('native')) }}\n\n"
+                    "- name: Validate PostgreSQL deploy mode\n"
+                    "  ansible.builtin.assert:\n"
+                    "    that:\n"
+                    "      - postgresql_deploy_mode_effective in ['compose', 'native', 'external']\n"
+                    "    fail_msg: \"postgresql_deploy_mode must be 'compose', 'native', or 'external'.\"\n",
+                    1,
+                )
+                text = text.replace(
+                    "  when: postgresql_deploy_mode == 'external'\n",
+                    "  when: postgresql_deploy_mode_effective == 'external'\n",
+                )
+                text = text.replace(
+                    "  when: postgresql_deploy_mode == 'compose'\n",
+                    "  when: postgresql_deploy_mode_effective == 'compose'\n",
+                )
+                text = text.replace(
+                    "    - postgresql_deploy_mode == 'native'\n",
+                    "    - postgresql_deploy_mode_effective == 'native'\n",
+                )
+                postgres_tasks.write_text(text)
+
+        db_users = Path("create_databases_and_users.yml")
+        if db_users.exists():
+            text = db_users.read_text()
+            if "postgresql_deploy_mode_effective" not in text:
+                text = text.replace(
+                    "    postgresql_deploy_mode: \"{{ lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true) }}\"\n",
+                    "    postgresql_deploy_mode: \"{{ lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true) }}\"\n"
+                    "    postgresql_deploy_mode_effective: >-\n"
+                    "      {{ 'native' if (lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true)) == 'standalone'\n"
+                    "         else (lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true)) }}\n",
+                    1,
+                )
+                for old, new in [
+                    ("      when: postgresql_deploy_mode == 'compose'\n", "      when: postgresql_deploy_mode_effective == 'compose'\n"),
+                    ("      when: postgresql_deploy_mode != 'compose'\n", "      when: postgresql_deploy_mode_effective != 'compose'\n"),
+                    ("      when: postgresql_deploy_mode == \"compose\" or (psql_check.rc | default(-1)) == 0\n", "      when: postgresql_deploy_mode_effective == \"compose\" or (psql_check.rc | default(-1)) == 0\n"),
+                    ("          - postgresql_deploy_mode == 'compose'\n", "          - postgresql_deploy_mode_effective == 'compose'\n"),
+                    ("          - postgresql_deploy_mode != 'compose'\n", "          - postgresql_deploy_mode_effective != 'compose'\n"),
+                ]:
+                    text = text.replace(old, new)
+                db_users.write_text(text)
+
+    patch_7()
+
+    def patch_8():
+
+        postgres_defaults = Path("roles/vhosts/postgres/defaults/main.yml")
+        if postgres_defaults.exists():
+            text = postgres_defaults.read_text()
+            replacements = [
+                (
+                    "postgresql_compose_project_dir: /opt/ai-workspace/postgres\n",
+                    "postgresql_compose_project_dir: >-\n"
+                    "  {{ (ansible_env.HOME ~ '/.local/state/ai-workspace/postgres')\n"
+                    "     if ansible_os_family == 'Darwin'\n"
+                    "     else '/opt/ai-workspace/postgres' }}\n",
+                ),
+                (
+                    "postgresql_admin_password_file: /root/.ai_workspace_postgres_password\n",
+                    "postgresql_admin_password_file: >-\n"
+                    "  {{ (ansible_env.HOME ~ '/.ai_workspace_postgres_password')\n"
+                    "     if ansible_os_family == 'Darwin'\n"
+                    "     else '/root/.ai_workspace_postgres_password' }}\n",
+                ),
+            ]
+            updated = text
+            for old, new in replacements:
+                updated = updated.replace(old, new)
+            if updated != text:
+                postgres_defaults.write_text(updated)
+
+        postgres_compose = Path("roles/vhosts/postgres/tasks/compose.yml")
+        if postgres_compose.exists():
+            text = postgres_compose.read_text()
+            docker_runtime_old = (
+                "- name: Ensure Docker runtime is installed for PostgreSQL compose mode\n"
+                "  ansible.builtin.include_role:\n"
+                "    name: roles/vhosts/docker\n"
+                "  when: postgresql_docker_version.rc != 0\n"
+            )
+            docker_runtime_new = (
+                "- name: Ensure Docker runtime is installed for PostgreSQL compose mode\n"
+                "  ansible.builtin.include_role:\n"
+                "    name: roles/vhosts/docker\n"
+                "  when: postgresql_docker_version.rc != 0\n"
+                "\n"
+                "- name: Inspect Docker daemon for PostgreSQL compose mode\n"
+                "  ansible.builtin.command: docker info\n"
+                "  register: postgresql_docker_info\n"
+                "  changed_when: false\n"
+                "  failed_when: false\n"
+                "\n"
+                "- name: Start Colima Docker daemon for PostgreSQL compose mode (macOS)\n"
+                "  ansible.builtin.command: colima start\n"
+                "  register: postgresql_colima_start\n"
+                "  changed_when: >-\n"
+                "    'already running' not in (postgresql_colima_start.stdout | default(''))\n"
+                "    and 'already running' not in (postgresql_colima_start.stderr | default(''))\n"
+                "  when:\n"
+                "    - ansible_os_family == 'Darwin'\n"
+                "    - postgresql_docker_info.rc != 0\n"
+                "\n"
+                "- name: Wait for Docker daemon after Colima start (macOS)\n"
+                "  ansible.builtin.command: docker info\n"
+                "  register: postgresql_docker_info_after_colima\n"
+                "  changed_when: false\n"
+                "  retries: 12\n"
+                "  delay: 5\n"
+                "  until: postgresql_docker_info_after_colima.rc == 0\n"
+                "  when:\n"
+                "    - ansible_os_family == 'Darwin'\n"
+                "    - postgresql_docker_info.rc != 0\n"
+            )
+            if "Start Colima Docker daemon for PostgreSQL compose mode" not in text and docker_runtime_old in text:
+                text = text.replace(docker_runtime_old, docker_runtime_new, 1)
+                postgres_compose.write_text(text)
+
+            old = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_compose_project_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: root\n"
+                "    group: root\n"
+                "    mode: \"0755\"\n"
+            )
+            new = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_compose_project_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                "    mode: \"0755\"\n"
+            )
+            if old in text and new not in text:
+                text = text.replace(old, new, 1)
+                postgres_compose.write_text(text)
+
+            data_old = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_data_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: \"{{ postgresql_container_uid }}\"\n"
+                "    group: \"{{ postgresql_container_gid }}\"\n"
+                "    mode: \"0700\"\n"
+            )
+            data_new = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_data_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else postgresql_container_uid }}\"\n"
+                "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else postgresql_container_gid }}\"\n"
+                "    mode: \"{{ '0755' if ansible_os_family == 'Darwin' else '0700' }}\"\n"
+            )
+            if data_old in text and data_new not in text:
+                text = text.replace(data_old, data_new, 1)
+                postgres_compose.write_text(text)
+
+            render_owner_replacements = [
+                (
+                    "    dest: \"{{ postgresql_compose_env_file }}\"\n"
+                    "    owner: root\n"
+                    "    group: root\n"
+                    "    mode: \"0600\"\n",
+                    "    dest: \"{{ postgresql_compose_env_file }}\"\n"
+                    "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    mode: \"0600\"\n",
+                ),
+                (
+                    "    dest: \"{{ postgresql_compose_file }}\"\n"
+                    "    owner: root\n"
+                    "    group: root\n"
+                    "    mode: \"0644\"\n",
+                    "    dest: \"{{ postgresql_compose_file }}\"\n"
+                    "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    mode: \"0644\"\n",
+                ),
+            ]
+            for render_old, render_new in render_owner_replacements:
+                if render_old in text and render_new not in text:
+                    text = text.replace(render_old, render_new, 1)
+                    postgres_compose.write_text(text)
+
+    patch_8()
 
 if __name__ == '__main__':
     main()

@@ -1747,7 +1747,10 @@ print_parallel_service_statuses() {
 }
 
 print_deployment_summary() {
-    local domain=${SERVER_DOMAIN:-${XWORKMATE_BRIDGE_DOMAIN:-${BRIDGE_DOMAIN:-${ACP_BRIDGE_DOMAIN:-xworkmate-bridge.svc.plus}}}}
+    local domain="${SERVER_DOMAIN-}"
+    if [ -z "$domain" ]; then
+        domain=${XWORKMATE_BRIDGE_DOMAIN:-${BRIDGE_DOMAIN:-${ACP_BRIDGE_DOMAIN:-xworkmate-bridge.svc.plus}}}
+    fi
     local token=$1
     local vault_token="${VAULT_SERVER_ROOT_ACCESS_TOKEN:-$token}"
     local vault_token_display="$vault_token"
