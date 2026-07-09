@@ -192,6 +192,35 @@ def main():
 
     patch_1()
 
+    def patch_vault_database_write():
+        # Keep database writes safe when an older Vault data directory is reused.
+        path = Path("write_passwords_to_vault.yml")
+        if not path.exists():
+            return
+        text = path.read_text()
+        marker = "    - name: Securely write database passwords to Vault KV\n"
+        if marker not in text or "Ensure Vault KV v2 mount exists before database writes" in text:
+            return
+        task = (
+            "    - name: Ensure Vault KV v2 mount exists before database writes\n"
+            "      ansible.builtin.command: >-\n"
+            "        bash -lc 'if ! vault secrets list -format=json | jq -e \\\"has(\\\\\\\"kv/\\\\\\\")\\\" >/dev/null; then vault secrets enable -version=2 kv >/dev/null; fi'\n"
+            "      environment:\n"
+            "        PATH: \"/opt/homebrew/bin:/usr/local/bin:{{ lookup('env', 'PATH') }}\"\n"
+            "        VAULT_ADDR: \"{{ vault_addr }}\"\n"
+            "        VAULT_TOKEN: \"{{ vault_token }}\"\n"
+            "      changed_when: false\n"
+            "      when:\n"
+            "        - resolved_db_configs is defined\n"
+            "        - vault_token | length > 0\n"
+            "      run_once: true\n"
+            "      delegate_to: localhost\n"
+            "      no_log: true\n\n"
+        )
+        path.write_text(text.replace(marker, task + marker, 1))
+
+    patch_vault_database_write()
+
     def patch_2():
         
         path = Path("roles/vhosts/common/tasks/main.yml")
