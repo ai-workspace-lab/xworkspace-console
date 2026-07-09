@@ -849,6 +849,26 @@ def main():
                 text = text.replace(old, new, 1)
                 postgres_compose.write_text(text)
 
+            data_old = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_data_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: \"{{ postgresql_container_uid }}\"\n"
+                "    group: \"{{ postgresql_container_gid }}\"\n"
+                "    mode: \"0700\"\n"
+            )
+            data_new = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_data_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else postgresql_container_uid }}\"\n"
+                "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else postgresql_container_gid }}\"\n"
+                "    mode: \"{{ '0755' if ansible_os_family == 'Darwin' else '0700' }}\"\n"
+            )
+            if data_old in text and data_new not in text:
+                text = text.replace(data_old, data_new, 1)
+                postgres_compose.write_text(text)
+
     patch_8()
 
 if __name__ == '__main__':
