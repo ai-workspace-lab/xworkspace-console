@@ -738,5 +738,118 @@ def main():
 
     patch_6()
 
+    def patch_7():
+        
+        postgres_tasks = Path("roles/vhosts/postgres/tasks/main.yml")
+        if postgres_tasks.exists():
+            text = postgres_tasks.read_text()
+            if "postgresql_deploy_mode_effective" not in text:
+                text = text.replace(
+                    "- name: Validate PostgreSQL deploy mode\n"
+                    "  ansible.builtin.assert:\n"
+                    "    that:\n"
+                    "      - postgresql_deploy_mode in ['compose', 'native', 'external']\n"
+                    "    fail_msg: \"postgresql_deploy_mode must be 'compose', 'native', or 'external'.\"\n",
+                    "- name: Normalize PostgreSQL deploy mode\n"
+                    "  ansible.builtin.set_fact:\n"
+                    "    postgresql_deploy_mode_effective: >-\n"
+                    "      {{ 'native' if (postgresql_deploy_mode | default('native')) == 'standalone' else (postgresql_deploy_mode | default('native')) }}\n\n"
+                    "- name: Validate PostgreSQL deploy mode\n"
+                    "  ansible.builtin.assert:\n"
+                    "    that:\n"
+                    "      - postgresql_deploy_mode_effective in ['compose', 'native', 'external']\n"
+                    "    fail_msg: \"postgresql_deploy_mode must be 'compose', 'native', or 'external'.\"\n",
+                    1,
+                )
+                text = text.replace(
+                    "  when: postgresql_deploy_mode == 'external'\n",
+                    "  when: postgresql_deploy_mode_effective == 'external'\n",
+                )
+                text = text.replace(
+                    "  when: postgresql_deploy_mode == 'compose'\n",
+                    "  when: postgresql_deploy_mode_effective == 'compose'\n",
+                )
+                text = text.replace(
+                    "    - postgresql_deploy_mode == 'native'\n",
+                    "    - postgresql_deploy_mode_effective == 'native'\n",
+                )
+                postgres_tasks.write_text(text)
+
+        db_users = Path("create_databases_and_users.yml")
+        if db_users.exists():
+            text = db_users.read_text()
+            if "postgresql_deploy_mode_effective" not in text:
+                text = text.replace(
+                    "    postgresql_deploy_mode: \"{{ lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true) }}\"\n",
+                    "    postgresql_deploy_mode: \"{{ lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true) }}\"\n"
+                    "    postgresql_deploy_mode_effective: >-\n"
+                    "      {{ 'native' if (lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true)) == 'standalone'\n"
+                    "         else (lookup('env', 'POSTGRESQL_DEPLOY_MODE') | default('native', true)) }}\n",
+                    1,
+                )
+                for old, new in [
+                    ("      when: postgresql_deploy_mode == 'compose'\n", "      when: postgresql_deploy_mode_effective == 'compose'\n"),
+                    ("      when: postgresql_deploy_mode != 'compose'\n", "      when: postgresql_deploy_mode_effective != 'compose'\n"),
+                    ("      when: postgresql_deploy_mode == \"compose\" or (psql_check.rc | default(-1)) == 0\n", "      when: postgresql_deploy_mode_effective == \"compose\" or (psql_check.rc | default(-1)) == 0\n"),
+                    ("          - postgresql_deploy_mode == 'compose'\n", "          - postgresql_deploy_mode_effective == 'compose'\n"),
+                    ("          - postgresql_deploy_mode != 'compose'\n", "          - postgresql_deploy_mode_effective != 'compose'\n"),
+                ]:
+                    text = text.replace(old, new)
+                db_users.write_text(text)
+
+    patch_7()
+
+    def patch_8():
+
+        postgres_defaults = Path("roles/vhosts/postgres/defaults/main.yml")
+        if postgres_defaults.exists():
+            text = postgres_defaults.read_text()
+            replacements = [
+                (
+                    "postgresql_compose_project_dir: /opt/ai-workspace/postgres\n",
+                    "postgresql_compose_project_dir: >-\n"
+                    "  {{ (ansible_env.HOME ~ '/.local/state/ai-workspace/postgres')\n"
+                    "     if ansible_os_family == 'Darwin'\n"
+                    "     else '/opt/ai-workspace/postgres' }}\n",
+                ),
+                (
+                    "postgresql_admin_password_file: /root/.ai_workspace_postgres_password\n",
+                    "postgresql_admin_password_file: >-\n"
+                    "  {{ (ansible_env.HOME ~ '/.ai_workspace_postgres_password')\n"
+                    "     if ansible_os_family == 'Darwin'\n"
+                    "     else '/root/.ai_workspace_postgres_password' }}\n",
+                ),
+            ]
+            updated = text
+            for old, new in replacements:
+                updated = updated.replace(old, new)
+            if updated != text:
+                postgres_defaults.write_text(updated)
+
+        postgres_compose = Path("roles/vhosts/postgres/tasks/compose.yml")
+        if postgres_compose.exists():
+            text = postgres_compose.read_text()
+            old = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_compose_project_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: root\n"
+                "    group: root\n"
+                "    mode: \"0755\"\n"
+            )
+            new = (
+                "  ansible.builtin.file:\n"
+                "    path: \"{{ postgresql_compose_project_dir }}\"\n"
+                "    state: directory\n"
+                "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                "    mode: \"0755\"\n"
+            )
+            if old in text and new not in text:
+                text = text.replace(old, new, 1)
+                postgres_compose.write_text(text)
+
+    patch_8()
+
 if __name__ == '__main__':
     main()
