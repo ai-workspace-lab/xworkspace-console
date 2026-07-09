@@ -869,6 +869,33 @@ def main():
                 text = text.replace(data_old, data_new, 1)
                 postgres_compose.write_text(text)
 
+            render_owner_replacements = [
+                (
+                    "    dest: \"{{ postgresql_compose_env_file }}\"\n"
+                    "    owner: root\n"
+                    "    group: root\n"
+                    "    mode: \"0600\"\n",
+                    "    dest: \"{{ postgresql_compose_env_file }}\"\n"
+                    "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    mode: \"0600\"\n",
+                ),
+                (
+                    "    dest: \"{{ postgresql_compose_file }}\"\n"
+                    "    owner: root\n"
+                    "    group: root\n"
+                    "    mode: \"0644\"\n",
+                    "    dest: \"{{ postgresql_compose_file }}\"\n"
+                    "    owner: \"{{ ansible_user_id if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    group: \"{{ 'staff' if ansible_os_family == 'Darwin' else 'root' }}\"\n"
+                    "    mode: \"0644\"\n",
+                ),
+            ]
+            for render_old, render_new in render_owner_replacements:
+                if render_old in text and render_new not in text:
+                    text = text.replace(render_old, render_new, 1)
+                    postgres_compose.write_text(text)
+
     patch_8()
 
 if __name__ == '__main__':
