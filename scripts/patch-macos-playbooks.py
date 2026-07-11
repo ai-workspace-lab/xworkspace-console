@@ -199,24 +199,62 @@ def main():
             return
         text = path.read_text()
         marker = "    - name: Securely write database passwords to Vault KV\n"
-        if marker not in text or "Ensure Vault KV v2 mount exists before database writes" in text:
+        debug_start = "    - name: Debug vault token length and prefix\n"
+        prepare_start = "    - name: Prepare Vault payload\n"
+        if debug_start in text and prepare_start in text:
+            start = text.index(debug_start)
+            end = text.index(prepare_start, start)
+            text = text[:start] + text[end:]
+        if marker not in text or "Inspect Vault mounts before database writes" in text:
+            path.write_text(text)
             return
         task = (
-            "    - name: Ensure Vault KV v2 mount exists before database writes\n"
-            "      ansible.builtin.command: >-\n"
-            "        bash -lc 'if ! vault secrets list -format=json | jq -e \\\"has(\\\\\\\"kv/\\\\\\\")\\\" >/dev/null; then vault secrets enable -version=2 kv >/dev/null; fi'\n"
-            "      environment:\n"
-            "        PATH: \"/opt/homebrew/bin:/usr/local/bin:{{ lookup('env', 'PATH') }}\"\n"
-            "        VAULT_ADDR: \"{{ vault_addr }}\"\n"
-            "        VAULT_TOKEN: \"{{ vault_token }}\"\n"
+            "    - name: Inspect Vault mounts before database writes\n"
+            "      ansible.builtin.uri:\n"
+            "        url: \"{{ vault_addr }}/v1/sys/mounts\"\n"
+            "        method: GET\n"
+            "        headers:\n"
+            "          X-Vault-Token: \"{{ vault_token }}\"\n"
+            "        status_code: 200\n"
+            "        return_content: true\n"
+            "      register: vault_mounts_before_database_write\n"
+            "      retries: 12\n"
+            "      delay: 5\n"
+            "      until: vault_mounts_before_database_write.status | default(0) == 200\n"
             "      changed_when: false\n"
             "      when:\n"
             "        - resolved_db_configs is defined\n"
             "        - vault_token | length > 0\n"
             "      run_once: true\n"
             "      delegate_to: localhost\n"
-            "      no_log: true\n\n"
+            "      no_log: \"{{ not (lookup('env', 'AI_WORKSPACE_DEBUG') | default('false', true) | bool) }}\"\n\n"
+            "    - name: Enable Vault KV v2 mount before database writes\n"
+            "      ansible.builtin.uri:\n"
+            "        url: \"{{ vault_addr }}/v1/sys/mounts/kv\"\n"
+            "        method: POST\n"
+            "        headers:\n"
+            "          X-Vault-Token: \"{{ vault_token }}\"\n"
+            "        body_format: json\n"
+            "        body:\n"
+            "          type: kv\n"
+            "          options:\n"
+            "            version: \"2\"\n"
+            "        status_code:\n"
+            "          - 200\n"
+            "          - 204\n"
+            "      when:\n"
+            "        - resolved_db_configs is defined\n"
+            "        - vault_token | length > 0\n"
+            "        - \"'kv/' not in (vault_mounts_before_database_write.json | default({}))\"\n"
+            "      run_once: true\n"
+            "      delegate_to: localhost\n"
+            "      no_log: \"{{ not (lookup('env', 'AI_WORKSPACE_DEBUG') | default('false', true) | bool) }}\"\n\n"
         )
+        old_start = "    - name: Ensure Vault KV v2 mount exists before database writes\n"
+        if old_start in text:
+            start = text.index(old_start)
+            end = text.index(marker, start)
+            text = text[:start] + text[end:]
         path.write_text(text.replace(marker, task + marker, 1))
 
     patch_vault_database_write()
