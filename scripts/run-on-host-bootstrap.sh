@@ -54,7 +54,7 @@ trap 'rm -f "$remote_payload"' EXIT
   printf 'OLLAMA_API_KEY=%q\n' "${OLLAMA_API_KEY:-}"
   printf 'AI_WORKSPACE_BRANCH=%q\n' "${GITHUB_REF_NAME:-main}"
   # BRANCH controls which branch of ai-workspace-infra/playbooks is cloned on-host.
-  printf 'BRANCH=%q\n' "${PLAYBOOKS_BRANCH:-fix-standalone-vault}"
+  printf 'BRANCH=%q\n' "${PLAYBOOKS_BRANCH:-main}"
 } > "$remote_payload"
 
 ssh "${ssh_opts[@]}" "${user}@${ip}" "mkdir -p '$remote_dir' && chmod 700 '$remote_dir'"
