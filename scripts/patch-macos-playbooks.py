@@ -245,7 +245,7 @@ def main():
             "      when:\n"
             "        - resolved_db_configs is defined\n"
             "        - vault_token | length > 0\n"
-            "        - \"'kv/' not in (vault_mounts_before_database_write.json | default({}))\"\n"
+            "        - \"'kv/' not in (vault_mounts_before_database_write.json.data | default({}))\"\n"
             "      run_once: true\n"
             "      delegate_to: localhost\n"
             "      no_log: \"{{ not (lookup('env', 'AI_WORKSPACE_DEBUG') | default('false', true) | bool) }}\"\n\n"
