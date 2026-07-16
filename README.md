@@ -1,5 +1,7 @@
 ![XWorkspace Console promotional poster](./assets/product.png)
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-2ea44f.svg)](./LICENSE) [![React](https://img.shields.io/badge/React-18%2B-61DAFB.svg?logo=react&logoColor=111827)](https://react.dev/) [![Go](https://img.shields.io/badge/Go-1.22%2B-00ADD8.svg?logo=go&logoColor=white)](https://go.dev/) [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Debian%20%7C%20Ubuntu-111827.svg)](./README.md)
+
 [🇺🇸 English](README.md) | [🇨🇳 中文](README.zh.md)
 
 # XWorkspace Console
