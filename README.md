@@ -1,3 +1,5 @@
+![XWorkspace Console promotional poster](./assets/product.png)
+
 [🇺🇸 English](README.md) | [🇨🇳 中文](README.zh.md)
 
 # XWorkspace Console
