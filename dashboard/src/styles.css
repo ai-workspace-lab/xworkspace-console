@@ -64,11 +64,13 @@ button {
   height: 48px;
   display: inline-grid;
   place-items: center;
-  border-radius: 8px;
-  color: #fff;
-  background: linear-gradient(135deg, #4f7df3, #5b4fe3);
-  font-size: 16px;
-  font-weight: 900;
+  border-radius: 13px;
+  background: transparent;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
+}
+
+.auth-card .brand-mark svg {
+  border-radius: 13px;
 }
 
 .auth-card h1 {
@@ -1275,8 +1277,12 @@ body {
   place-items: center;
   border-radius: 12px;
   color: #fff;
-  background: linear-gradient(135deg, #4c7df0, #6558f5);
-  box-shadow: 0 10px 18px rgba(69, 99, 219, 0.22);
+  background: transparent;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.24);
+}
+
+.brand-mark svg {
+  border-radius: 11px;
 }
 
 .brand-mark .icon {
@@ -1289,6 +1295,10 @@ body {
   font-size: 17px;
   letter-spacing: 0;
   white-space: nowrap;
+}
+
+.app-shell.theme-dark .brand strong {
+  color: #e8edf8;
 }
 
 .brand-tag {

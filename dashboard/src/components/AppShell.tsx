@@ -21,6 +21,7 @@ import { WorkspaceTabs } from './WorkspaceTabs';
 import { WorkspaceHome } from './WorkspaceHome';
 import { ServicePanel } from './ServicePanel';
 import { ResetAuthModal } from './ResetAuthModal';
+import { CuboDockMark } from './CuboDockMark';
 
 export function AppShell() {
   const [selectedTab, setSelectedTab] = useState('workspace');
@@ -264,7 +265,9 @@ function AuthGate({
           onSubmit();
         }}
       >
-        <span className="brand-mark">AI</span>
+        <span className="brand-mark">
+          <CuboDockMark size={44} />
+        </span>
         <h1>AI Workspace Portal</h1>
         <p>Enter the xworkmate-bridge token to load local services.</p>
         <input
