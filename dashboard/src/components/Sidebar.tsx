@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { Labels, NavItem, NavSection } from '@/lib/data';
 import { Icon } from './Icon';
+import { CuboDockMark } from './CuboDockMark';
 
 export function Sidebar({
   labels,
@@ -36,7 +37,15 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark"><Icon name="bot" /></span>
+        <span className="brand-mark" title="AI Workspace - Cubo-Dock">
+          <CuboDockMark size={36} />
+        </span>
+        {!collapsed ? (
+          <>
+            <strong>{labels.homepageTitle || 'AI Workspace'}</strong>
+            <span className="brand-tag">CONSOLE</span>
+          </>
+        ) : null}
       </div>
 
       <nav className="side-nav" aria-label="XWorkspace navigation">
